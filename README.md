@@ -2,6 +2,9 @@
 
 The repository contains a bare minimum code example to get started with the Agent Inbox with LangGraph.
 
+> [!TIP]
+> Looking for the TypeScript version of this example repository? Click [here](https://github.com/langchain-ai/agent-inbox-langgraphjs-example)
+
 ## Getting Started
 
 To get started, clone the repository:
