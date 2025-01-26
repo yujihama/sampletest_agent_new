@@ -1,35 +1,28 @@
-[project]
-name = "agent"
+[tool.poetry]
+name = "agent-inbox-example"
 version = "0.0.1"
-description = "Starter template for making a new agent LangGraph."
-authors = [
-    { name = "William Fu-Hinthorn", email = "13333726+hinthornw@users.noreply.github.com" },
-]
+description = "Example repository for getting started with the Agent Inbox"
+authors = ["Brace Sproul"]
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.9"
-dependencies = [
-    "langgraph>=0.2.6",
-    "python-dotenv>=1.0.1",
+license = "MIT"
+packages = [
+    { include = "agent", from = "src" }
 ]
 
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0.0"
+langgraph = ">=0.2.67"
+python-dotenv = ">=1.0.1"
+langgraph-sdk = ">=0.1.51"
+pytest = "^8.3.4"
 
-[project.optional-dependencies]
-dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+[tool.poetry.group.dev.dependencies]
+mypy = ">=1.11.1"
+ruff = ">=0.6.1"
 
 [build-system]
-requires = ["setuptools>=73.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = ["langgraph.templates.agent", "agent"]
-[tool.setuptools.package-dir]
-"langgraph.templates.agent" = "src/agent"
-"agent" = "src/agent"
-
-
-[tool.setuptools.package-data]
-"*" = ["py.typed"]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 lint.select = [
