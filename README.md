@@ -11,7 +11,7 @@ git clone https://github.com/langchain-ai/agent-inbox-langgraph-example.git
 ```
 
 ```bash
-cd agent-inbox-example
+cd agent-inbox-langgraph-example
 ```
 
 Then, install the dependencies:
