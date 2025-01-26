@@ -7,7 +7,7 @@ The repository contains a bare minimum code example to get started with the Agen
 To get started, clone the repository:
 
 ```bash
-git clone https://github.com/langchain-ai/agent-inbox-example
+git clone https://github.com/langchain-ai/agent-inbox-langgraph-example.git
 ```
 
 ```bash
