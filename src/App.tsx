@@ -1,5 +1,5 @@
 import React from 'react'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import './App.css'
 
 function App() {
@@ -11,11 +11,19 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [message, setMessage] = useState('')
   const [showContinueButton, setShowContinueButton] = useState(false)
+  const [terminalOutput, setTerminalOutput] = useState<string[]>([])
+  const terminalRef = useRef<HTMLDivElement>(null)
   const fileInputRefs = {
     sample1: useRef<HTMLInputElement>(null),
     sample2: useRef<HTMLInputElement>(null),
     format: useRef<HTMLInputElement>(null)
   }
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+    }
+  }, [terminalOutput])
 
   const handleFileSelect = (category: string, files: FileList | null) => {
     if (files) {
@@ -30,6 +38,7 @@ function App() {
     setIsProcessing(true)
     setShowContinueButton(false)
     setMessage('処理を開始しています...')
+    setTerminalOutput([])
 
     try {
       // Check if any files are missing
@@ -54,8 +63,16 @@ function App() {
 
   const processFiles = async () => {
     try {
-      // Here you would implement the actual file processing logic
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Simulate LangGraph processing with terminal output
+      setTerminalOutput(prev => [...prev, '--- Iteration 1/2 ---'])
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      setTerminalOutput(prev => [...prev, 'Processing sample 1...'])
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      setTerminalOutput(prev => [...prev, '--- Iteration 2/2 ---'])
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      setTerminalOutput(prev => [...prev, 'Processing sample 2...'])
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      setTerminalOutput(prev => [...prev, '--- Updating Format ---'])
       setMessage('処理が完了しました！')
     } finally {
       setIsProcessing(false)
@@ -142,6 +159,18 @@ function App() {
                 {message}
               </div>
             )}
+
+            <div className="mt-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-2">実行ログ</h2>
+              <div
+                ref={terminalRef}
+                className="bg-gray-900 text-gray-100 p-4 rounded-md h-48 overflow-y-auto font-mono text-sm"
+              >
+                {terminalOutput.map((line, index) => (
+                  <div key={index} className="whitespace-pre-wrap">{line}</div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
