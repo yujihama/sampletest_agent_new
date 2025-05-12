@@ -65,40 +65,44 @@ function App() {
 
   const processFiles = async () => {
     try {
-      // Simulate LangGraph processing with terminal output and state updates
-      setTerminalOutput(prev => [...prev, '--- Iteration 1/2 ---'])
-      setStateOutput({
-        iteration_count: 1,
-        max_iterations: 2,
-        procedure: "2025年のデータか確認してください。",
-        messages: [],
-        data_info: {
-          1: "C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\1",
-          2: "C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\2"
-        }
+      const response = await fetch('http://localhost:8000/process', {
+        method: 'GET',
       })
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      setTerminalOutput(prev => [...prev, 'Processing sample 1...'])
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      setTerminalOutput(prev => [...prev, '--- Iteration 2/2 ---'])
-      setStateOutput(prev => ({
-        ...prev,
-        iteration_count: 2,
-        messages: [...(prev?.messages || []), { role: 'assistant', content: '画像1の確認が完了しました。' }]
-      }))
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      setTerminalOutput(prev => [...prev, 'Processing sample 2...'])
-      setStateOutput(prev => ({
-        ...prev,
-        messages: [...(prev?.messages || []), { role: 'assistant', content: '画像2の確認が完了しました。' }]
-      }))
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      setTerminalOutput(prev => [...prev, '--- Updating Format ---'])
+
+      if (!response.ok) {
+        throw new Error('Network response was not ok')
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No reader available')
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const text = new TextDecoder().decode(value)
+        const lines = text.split('\n').filter(line => line.trim())
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line)
+            if (data.type === 'terminal') {
+              setTerminalOutput(prev => [...prev, data.content])
+            } else if (data.type === 'state') {
+              setStateOutput(data.content)
+            }
+          } catch (e) {
+            setTerminalOutput(prev => [...prev, line])
+          }
+        }
+      }
+
       setMessage('処理が完了しました！')
+    } catch (error) {
+      console.error('Error:', error)
+      setMessage('エラーが発生しました。')
     } finally {
       setIsProcessing(false)
     }
