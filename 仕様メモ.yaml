@@ -1,0 +1,132 @@
+# 監査サンプルテストツール 仕様書
+version: 1.0
+purpose: 監査サンプルテストにおいて、各サンプルに対する所定の手続き実施と評価（OK/NG）をLLMを用いて支援する。
+
+# --------------------------------------------------
+# 技術スタック (Technology Stack)
+# --------------------------------------------------
+technology_stack:
+  framework: LangGraph # ステートフルなエージェントワークフロー管理
+  llm:
+    provider: OpenAI or Azure OpenAI # 選択可能
+  agent_architecture: ReAct # Reasoning and Acting
+  core_libraries:
+    - LangChain
+    - LangGraph
+  prebuilt_libraries: # LangGraphエコシステムのプレビルドライブラリ活用
+    memory:
+      name: langmem
+      status: Required # 人間への問い合わせナレッジ管理に必須
+      reference: https://github.com/langchain-ai/langmem
+    tool_call_reliability:
+      name: trustcall
+      status: Recommended # ツール呼び出しの安定性向上のため推奨
+      reference: https://github.com/hinthornw/trustcall
+    self_reflection:
+      name: langgraph-reflection
+      status: Optional # 判断品質向上のため検討
+      reference: https://github.com/langchain-ai/langgraph-reflection
+
+# --------------------------------------------------
+# 入力仕様 (Input Specification)
+# --------------------------------------------------
+input:
+  sample_specification:
+    format: Folder Path # 監査対象のサンプル群が格納されたルートフォルダパス
+    structure: Root_Folder -> Sample_Subfolder (e.g., No.1, No.2, ...)
+  sample_file_formats:
+    supported: # 各サンプルサブフォルダ内に含まれる可能性のあるファイル形式
+      - csv
+      - png
+      - txt
+      - jpg
+      - pdf
+    notes: 上記形式からの情報抽出が必要
+  procedure_instruction:
+    format: Natural Language Text 
+    content:
+      - description: 実行すべき手続き内容
+
+# --------------------------------------------------
+# 処理フロー (Processing Flow - LangGraph StateGraphで実装)
+# --------------------------------------------------
+processing_flow:
+  - step: Initialization
+    description: StateGraph構築、LLMとツールの準備、メモリ(langmem)のロード
+  - step: Sample Processing Loop
+    description: 指定されたルートフォルダ内の各サンプルサブフォルダに対して以下を実行
+    sub_steps:
+      - name: Receive Instruction
+        description: ユーザーから対象サンプルフォルダと自然言語指示を受け取る
+      - name: ReAct Cycle
+        description: エージェントが思考・行動・観察を繰り返す
+        components:
+          - Thought: LLMが指示解釈、状況判断、次の行動決定
+          - Action:
+              - Tool Selection/Parameter Generation: 使用ツールとパラメータ決定 (trustcallが支援)
+              - Tool Execution: 選択されたツールを実行 (データ抽出, 画像分析, メモリ検索など)
+          - Observation: ツール実行結果を取得
+      - name: Human Inquiry Logic
+        condition: LLM判断の確信度低、情報/基準不足時など
+        actions:
+          - Knowledge Search: langmemで類似質問のナレッジを検索
+          - Inquiry Execution: ナレッジがない場合、人間問い合わせツールでユーザーに質問 (処理中断)
+          - Response Acquisition & Knowledge Storage: ユーザー回答を取得し、langmemにQ&Aを保存
+      - name: Evaluation/Judgment
+        description: LLMがOK/NGを判断。NG時は理由も生成。人間判断が介在した場合は記録。
+      - name: NA Handling
+        condition: ファイル破損・アクセス不能など処理実行不可能な場合
+        action: 結果をNAとして記録
+      - name: Result Logging
+        description: サンプルID, 指示, 結果, 理由, ログなどを一時保持
+  - step: Final Output
+    description: 全サンプルの処理結果をCSVファイルに出力
+
+# --------------------------------------------------
+# ツール詳細 (Tool Details - ReAct Agentが利用)
+# --------------------------------------------------
+tools:
+  - name: human_inquiry_tool
+    description: LLMが判断に迷った場合にユーザーに質問・確認を行う
+    functions:
+      - Interrupt processing
+      - Present question to user
+      - Receive user answer
+      - Integrate with langmem (Search knowledge before asking, Store Q&A after response)
+    implementation: LangGraph Interrupt or Custom Tool
+  - name: image_analysis_tool
+    description: 画像(png, jpg)およびPDF内の画像からテキスト情報をOCR抽出
+    implementation: Wrapper for Vision API (OpenAI/Azure) or OCR Library (e.g., Tesseract)
+  - name: data_extraction_tool_csv_txt
+    description: CSV, TXTファイルから指定されたデータを抽出
+    implementation: Wrapper for Python Libraries (e.g., csv, pandas)
+  - name: data_extraction_tool_pdf
+    description: PDFファイルからテキストや表データを抽出
+    implementation: Wrapper for Python Libraries (e.g., PyMuPDF, pdfminer.six)
+  # --- Prebuilt Library Integrations as Tools/Enhancements ---
+  - name: trustcall_integration (Recommended)
+    role: Enhance tool call reliability by validating/correcting LLM-generated parameters
+  - name: langmem_integration (Required)
+    role: Store and retrieve human inquiry knowledge (Q&A pairs)
+    components: create_manage_memory_tool, create_search_memory_tool
+  - name: langgraph_reflection_integration (Optional)
+    role: Enable review and refinement of LLM's final judgment
+
+# --------------------------------------------------
+# 出力仕様 (Output Specification)
+# --------------------------------------------------
+output:
+  format: CSV File
+  columns:
+    - name: sample_id
+      description: 処理対象のサンプルID (e.g., No.1)
+    - name: procedure_instruction
+      description: ユーザーが入力した自然言語指示
+    - name: evaluation_result
+      description: 評価結果 (OK | NG | Human Judgement | NA)
+    - name: ng_reason
+      description: NGの場合の具体的な理由 (空欄の場合あり)
+    - name: interaction_log
+      description: 人間への問い合わせがあった場合のQ&A履歴 (空欄の場合あり)
+    - name: processing_timestamp
+      description: 処理完了日時
