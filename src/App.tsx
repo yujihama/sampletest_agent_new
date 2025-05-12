@@ -10,6 +10,7 @@ function App() {
   })
   const [isProcessing, setIsProcessing] = useState(false)
   const [message, setMessage] = useState('')
+  const [showContinueButton, setShowContinueButton] = useState(false)
   const fileInputRefs = {
     sample1: useRef<HTMLInputElement>(null),
     sample2: useRef<HTMLInputElement>(null),
@@ -27,6 +28,7 @@ function App() {
 
   const handleStartProcessing = async () => {
     setIsProcessing(true)
+    setShowContinueButton(false)
     setMessage('処理を開始しています...')
 
     try {
@@ -37,18 +39,33 @@ function App() {
       if (!selectedFiles.format.length) missingFiles.push('フォーマット')
 
       if (missingFiles.length > 0) {
-        setMessage(`警告: ${missingFiles.join(', ')}のファイルが未選択です。処理を続行しますか？`)
-      } else {
-        setMessage('処理が完了しました！')
+        setMessage(`警告: ${missingFiles.join(', ')}のファイルが未選択です。`)
+        setShowContinueButton(true)
+        setIsProcessing(false)
+        return
       }
 
-      // Here you would implement the actual file processing logic
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      await processFiles()
     } catch (error) {
       setMessage('エラーが発生しました。')
+      setIsProcessing(false)
+    }
+  }
+
+  const processFiles = async () => {
+    try {
+      // Here you would implement the actual file processing logic
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      setMessage('処理が完了しました！')
     } finally {
       setIsProcessing(false)
     }
+  }
+
+  const handleContinueProcessing = async () => {
+    setIsProcessing(true)
+    setShowContinueButton(false)
+    await processFiles()
   }
 
   const renderFileInput = (category: string, label: string) => (
@@ -90,16 +107,29 @@ function App() {
             {renderFileInput('sample2', 'サンプル2のファイル')}
             {renderFileInput('format', 'フォーマットファイル')}
 
-            <button
-              onClick={handleStartProcessing}
-              disabled={isProcessing}
-              className={`w-full py-3 px-4 rounded-md text-white font-medium
-                ${isProcessing 
-                  ? 'bg-gray-400 cursor-not-allowed' 
-                  : 'bg-blue-600 hover:bg-blue-700'}`}
-            >
-              {isProcessing ? '処理中...' : '処理開始'}
-            </button>
+            <div className="flex flex-col space-y-4">
+              {!showContinueButton && (
+                <button
+                  onClick={handleStartProcessing}
+                  disabled={isProcessing}
+                  className={`w-full py-3 px-4 rounded-md text-white font-medium
+                    ${isProcessing 
+                      ? 'bg-gray-400 cursor-not-allowed' 
+                      : 'bg-blue-600 hover:bg-blue-700'}`}
+                >
+                  {isProcessing ? '処理中...' : '処理開始'}
+                </button>
+              )}
+
+              {showContinueButton && (
+                <button
+                  onClick={handleContinueProcessing}
+                  className="w-full py-3 px-4 rounded-md text-white font-medium bg-yellow-600 hover:bg-yellow-700"
+                >
+                  警告を無視して続行
+                </button>
+              )}
+            </div>
 
             {message && (
               <div className={`mt-4 p-4 rounded-md ${
