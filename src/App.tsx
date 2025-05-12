@@ -12,6 +12,7 @@ function App() {
   const [message, setMessage] = useState('')
   const [showContinueButton, setShowContinueButton] = useState(false)
   const [terminalOutput, setTerminalOutput] = useState<string[]>([])
+  const [stateOutput, setStateOutput] = useState<any>(null)
   const terminalRef = useRef<HTMLDivElement>(null)
   const fileInputRefs = {
     sample1: useRef<HTMLInputElement>(null),
@@ -39,6 +40,7 @@ function App() {
     setShowContinueButton(false)
     setMessage('処理を開始しています...')
     setTerminalOutput([])
+    setStateOutput(null)
 
     try {
       // Check if any files are missing
@@ -63,15 +65,38 @@ function App() {
 
   const processFiles = async () => {
     try {
-      // Simulate LangGraph processing with terminal output
+      // Simulate LangGraph processing with terminal output and state updates
       setTerminalOutput(prev => [...prev, '--- Iteration 1/2 ---'])
+      setStateOutput({
+        iteration_count: 1,
+        max_iterations: 2,
+        procedure: "2025年のデータか確認してください。",
+        messages: [],
+        data_info: {
+          1: "C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\1",
+          2: "C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\2"
+        }
+      })
       await new Promise(resolve => setTimeout(resolve, 1000))
+      
       setTerminalOutput(prev => [...prev, 'Processing sample 1...'])
       await new Promise(resolve => setTimeout(resolve, 1000))
+      
       setTerminalOutput(prev => [...prev, '--- Iteration 2/2 ---'])
+      setStateOutput(prev => ({
+        ...prev,
+        iteration_count: 2,
+        messages: [...(prev?.messages || []), { role: 'assistant', content: '画像1の確認が完了しました。' }]
+      }))
       await new Promise(resolve => setTimeout(resolve, 1000))
+      
       setTerminalOutput(prev => [...prev, 'Processing sample 2...'])
+      setStateOutput(prev => ({
+        ...prev,
+        messages: [...(prev?.messages || []), { role: 'assistant', content: '画像2の確認が完了しました。' }]
+      }))
       await new Promise(resolve => setTimeout(resolve, 1000))
+      
       setTerminalOutput(prev => [...prev, '--- Updating Format ---'])
       setMessage('処理が完了しました！')
     } finally {
@@ -160,16 +185,29 @@ function App() {
               </div>
             )}
 
-            <div className="mt-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-2">実行ログ</h2>
-              <div
-                ref={terminalRef}
-                className="bg-gray-900 text-gray-100 p-4 rounded-md h-48 overflow-y-auto font-mono text-sm"
-              >
-                {terminalOutput.map((line, index) => (
-                  <div key={index} className="whitespace-pre-wrap">{line}</div>
-                ))}
+            <div className="mt-6 space-y-4">
+              <div>
+                <h2 className="text-lg font-medium text-gray-900 mb-2">実行ログ</h2>
+                <div
+                  ref={terminalRef}
+                  className="bg-gray-900 text-gray-100 p-4 rounded-md h-48 overflow-y-auto font-mono text-sm"
+                >
+                  {terminalOutput.map((line, index) => (
+                    <div key={index} className="whitespace-pre-wrap">{line}</div>
+                  ))}
+                </div>
               </div>
+
+              {stateOutput && (
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900 mb-2">LangGraph State</h2>
+                  <div className="bg-gray-100 p-4 rounded-md overflow-x-auto">
+                    <pre className="text-sm">
+                      {JSON.stringify(stateOutput, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
