@@ -26,20 +26,24 @@ function App() {
   }
 
   const handleStartProcessing = async () => {
-    // Validate files
-    if (!selectedFiles.sample1.length || !selectedFiles.sample2.length || !selectedFiles.format.length) {
-      setMessage('すべてのファイルをアップロードしてください。')
-      return
-    }
-
     setIsProcessing(true)
     setMessage('処理を開始しています...')
 
     try {
-      // Here you would implement the actual file upload and processing logic
-      // For now, we'll just simulate the process
+      // Check if any files are missing
+      const missingFiles = []
+      if (!selectedFiles.sample1.length) missingFiles.push('サンプル1')
+      if (!selectedFiles.sample2.length) missingFiles.push('サンプル2')
+      if (!selectedFiles.format.length) missingFiles.push('フォーマット')
+
+      if (missingFiles.length > 0) {
+        setMessage(`警告: ${missingFiles.join(', ')}のファイルが未選択です。処理を続行しますか？`)
+      } else {
+        setMessage('処理が完了しました！')
+      }
+
+      // Here you would implement the actual file processing logic
       await new Promise(resolve => setTimeout(resolve, 2000))
-      setMessage('処理が完了しました！')
     } catch (error) {
       setMessage('エラーが発生しました。')
     } finally {
@@ -101,6 +105,8 @@ function App() {
               <div className={`mt-4 p-4 rounded-md ${
                 message.includes('エラー') 
                   ? 'bg-red-50 text-red-700' 
+                  : message.includes('警告')
+                  ? 'bg-yellow-50 text-yellow-700'
                   : 'bg-green-50 text-green-700'
               }`}>
                 {message}
