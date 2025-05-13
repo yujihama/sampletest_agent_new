@@ -91,10 +91,16 @@ function App() {
             if (data.type === 'terminal') {
               setTerminalOutput(prev => [...prev, data.content])
             } else if (data.type === 'state') {
-              setStateOutput(data.content)
+              setStateOutput(prev => ({
+                ...prev,
+                ...data.content
+              }))
+            } else if (data.type === 'error') {
+              setTerminalOutput(prev => [...prev, `Error: ${data.content}`])
             }
           } catch (e) {
-            setTerminalOutput(prev => [...prev, line])
+            console.error('Error parsing line:', e)
+            setTerminalOutput(prev => [...prev, `Failed to parse: ${line}`])
           }
         }
       }
@@ -206,7 +212,7 @@ function App() {
                 <div>
                   <h2 className="text-lg font-medium text-gray-900 mb-2">LangGraph State</h2>
                   <div className="bg-gray-100 p-4 rounded-md overflow-x-auto">
-                    <pre className="text-sm">
+                    <pre className="text-sm whitespace-pre-wrap">
                       {JSON.stringify(stateOutput, null, 2)}
                     </pre>
                   </div>
