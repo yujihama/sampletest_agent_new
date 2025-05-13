@@ -69,19 +69,8 @@ function App() {
         method: 'GET',
       })
 
-      const contentType = response.headers.get('content-type')
-      
       if (!response.ok) {
-        if (contentType?.includes('application/json')) {
-          const errorData = await response.json()
-          throw new Error(errorData.content || 'Server error occurred')
-        } else {
-          throw new Error('Unexpected server response format')
-        }
-      }
-
-      if (!contentType?.includes('text/event-stream')) {
-        throw new Error('Invalid server response format')
+        throw new Error('Server returned an error response')
       }
 
       const reader = response.body?.getReader()
@@ -89,25 +78,38 @@ function App() {
         throw new Error('No reader available')
       }
 
+      const decoder = new TextDecoder()
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const text = new TextDecoder().decode(value)
+        const text = decoder.decode(value)
         const lines = text.split('\n').filter(line => line.trim())
 
         for (const line of lines) {
           try {
             const data = JSON.parse(line)
-            if (data.type === 'terminal') {
-              setTerminalOutput(prev => [...prev, data.content])
-            } else if (data.type === 'state') {
-              setStateOutput(prev => ({
-                ...prev,
-                ...data.content
-              }))
-            } else if (data.type === 'error') {
-              setTerminalOutput(prev => [...prev, `Error: ${data.content}`])
+            if (!data.type || !data.content) {
+              console.error('Invalid data format:', data)
+              continue
+            }
+
+            switch (data.type) {
+              case 'terminal':
+                setTerminalOutput(prev => [...prev, data.content])
+                break
+              case 'state':
+                setStateOutput(prev => ({
+                  ...prev,
+                  ...data.content
+                }))
+                break
+              case 'error':
+                setTerminalOutput(prev => [...prev, `Error: ${data.content}`])
+                setMessage(`エラーが発生しました: ${data.content}`)
+                break
+              default:
+                console.warn('Unknown message type:', data.type)
             }
           } catch (e) {
             console.error('Error parsing line:', e)
@@ -120,6 +122,7 @@ function App() {
     } catch (error) {
       console.error('Error:', error)
       setMessage(`エラーが発生しました: ${error.message}`)
+      setTerminalOutput(prev => [...prev, `Error: ${error.message}`])
     } finally {
       setIsProcessing(false)
     }

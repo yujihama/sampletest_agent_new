@@ -35,24 +35,29 @@ async def process_stream() -> AsyncGenerator[str, None]:
     except Exception as e:
         yield json.dumps({"type": "error", "content": str(e)}) + "\n"
 
+async def error_stream(error_message: str) -> AsyncGenerator[str, None]:
+    """Create an error stream in the correct SSE format."""
+    yield json.dumps({"type": "error", "content": str(error_message)}) + "\n"
+
 @app.get("/process")
 async def process():
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+    }
+    
     try:
-        headers = {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-        
         return StreamingResponse(
             content=process_stream(),
             media_type="text/event-stream",
             headers=headers
         )
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"type": "error", "content": str(e)},
-            headers={"Content-Type": "application/json"}
+        # Return error as a streaming response to maintain consistent format
+        return StreamingResponse(
+            content=error_stream(str(e)),
+            media_type="text/event-stream",
+            headers=headers
         )
