@@ -4,7 +4,7 @@ import json
 from agent.graph import graph
 import asyncio
 from typing import AsyncGenerator
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI()
 
@@ -45,14 +45,14 @@ async def process():
             "X-Accel-Buffering": "no"
         }
         
-        return Response(
-            content_iterator=process_stream(),
+        return StreamingResponse(
+            content=process_stream(),
             media_type="text/event-stream",
             headers=headers
         )
     except Exception as e:
-        # Return a proper JSON error response
         return JSONResponse(
             status_code=500,
-            content={"type": "error", "content": str(e)}
+            content={"type": "error", "content": str(e)},
+            headers={"Content-Type": "application/json"}
         )

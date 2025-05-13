@@ -69,15 +69,19 @@ function App() {
         method: 'GET',
       })
 
+      const contentType = response.headers.get('content-type')
+      
       if (!response.ok) {
-        // Check if the response is JSON
-        const contentType = response.headers.get('content-type')
-        if (contentType && contentType.includes('application/json')) {
+        if (contentType?.includes('application/json')) {
           const errorData = await response.json()
           throw new Error(errorData.content || 'Server error occurred')
         } else {
-          throw new Error('Server error occurred')
+          throw new Error('Unexpected server response format')
         }
+      }
+
+      if (!contentType?.includes('text/event-stream')) {
+        throw new Error('Invalid server response format')
       }
 
       const reader = response.body?.getReader()
