@@ -67,10 +67,15 @@ function App() {
     try {
       const response = await fetch('http://localhost:8000/process', {
         method: 'GET',
+        headers: {
+          'Accept': 'text/event-stream',
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
       })
 
       if (!response.ok) {
-        throw new Error('Server returned an error response')
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`)
       }
 
       const reader = response.body?.getReader()
