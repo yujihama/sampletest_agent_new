@@ -37,7 +37,23 @@ async def process_stream() -> AsyncGenerator[str, None]:
 
 @app.get("/process")
 async def process():
-    return Response(
-        content_iterator=process_stream(),
-        media_type="text/event-stream"
-    )
+    headers = {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+    }
+    
+    try:
+        return Response(
+            content_iterator=process_stream(),
+            media_type="text/event-stream",
+            headers=headers
+        )
+    except Exception as e:
+        # Ensure we return JSON even for unexpected errors
+        return Response(
+            content=json.dumps({"type": "error", "content": str(e)}) + "\n",
+            media_type="text/event-stream",
+            headers=headers
+        )
