@@ -70,7 +70,14 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Network response was not ok')
+        // Check if the response is JSON
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json()
+          throw new Error(errorData.content || 'Server error occurred')
+        } else {
+          throw new Error('Server error occurred')
+        }
       }
 
       const reader = response.body?.getReader()
@@ -100,7 +107,7 @@ function App() {
             }
           } catch (e) {
             console.error('Error parsing line:', e)
-            setTerminalOutput(prev => [...prev, `Failed to parse: ${line}`])
+            setTerminalOutput(prev => [...prev, `Error: Failed to parse server response`])
           }
         }
       }
@@ -108,7 +115,7 @@ function App() {
       setMessage('処理が完了しました！')
     } catch (error) {
       console.error('Error:', error)
-      setMessage('エラーが発生しました。')
+      setMessage(`エラーが発生しました: ${error.message}`)
     } finally {
       setIsProcessing(false)
     }
