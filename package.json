@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@types/formidable": "^3.4.5",
+    "formidable": "^3.5.4"
+  }
+}

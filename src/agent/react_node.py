@@ -16,9 +16,13 @@ from langgraph.types import interrupt
 import httpx
 import base64
 import os
+import fitz
 
 def query_to_human(query: str) -> str:
-    """Query to human if you need to know some information."""
+    """
+    上位者への問い合わせを行う。
+    どのデータについて、何を確認したいか明確に伝えることが必要。
+    """
     action_request = ActionRequest(
         action="Confirm Message",
         args={"message": query},
@@ -52,6 +56,28 @@ def query_to_human(query: str) -> str:
     
     return message
 
+def analyze_image(image_data_num: int, query: str) -> str:
+    """
+    画像データを分析する。何枚目の画像について、何を確認したいか明確に伝えることが必要。
+    arg:
+        image_data_num: 何枚目の画像について知りたいか数字で指定
+        query: 確認したい内容
+    return:
+        str: 分析結果
+    """
+    image_data_base64 = state.image_data[image_data_num-1]
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    message = HumanMessage(
+            content=[
+                {"type":"text","text":query},
+                {"type":"image_url","image_url": {"url": f"data:image/jpeg;base64,{image_data_base64}"}}
+            ]
+        )
+    inputs = {"messages": [message]}
+    result = llm.invoke(inputs)
+    print(f"result: {result}")
+    return result.content
+
 def get_base64_from_image(image_path: str) -> str:
     """
     画像ファイルを読み込み、base64エンコードされた文字列を返す関数
@@ -70,35 +96,56 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
     current_iteration = int(state.iteration_count) + 1
     print(f"--- Iteration {current_iteration}/{state.max_iterations} ---")
 
-    state.data_info = {1:"C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\1",2:"C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample\\2"}
+    if state.sample_data_path:
+        data_path = os.path.join("C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample",state.sample_data_path)
+        sample_num = len(os.listdir(data_path))
 
-    for file in os.listdir(state.data_info[current_iteration]):
-        if file.endswith(".jpg") or file.endswith(".png"):
-            image_data = get_base64_from_image(os.path.join(state.data_info[current_iteration], file))
-            break
-
+    image_data = []
+    if state.sample_data_path:
+        sample_data = os.listdir(data_path)[current_iteration-1]
+        print(f"sample_data: {sample_data}")
+        for file in os.listdir(os.path.join(data_path, sample_data)):
+            file_path = os.path.join(data_path, sample_data, file)
+            print(f"file_path: {file_path}")
+            if file.endswith(".pdf"):
+                # PyMuPDFでPDFをページごとに画像化
+                doc = fitz.open(file_path)
+                print(f"doc_length: {len(doc)}")
+                for page in doc[:5]:
+                    pix = page.get_pixmap()
+                    # メモリ上でPNGバイト列に変換
+                    image_bytes = pix.tobytes("png")
+                    # base64エンコード
+                    image_data.append(base64.b64encode(image_bytes).decode("utf-8"))
+                doc.close()
+            elif file.endswith(".jpg") or file.endswith(".png"):
+                image_data.append(get_base64_from_image(file_path))
+                
     agent = create_react_agent(
         model="gpt-4o-mini",
-        tools=[query_to_human],
+        state_schema = {"image_data": image_data},
+        tools=[query_to_human, analyze_image],
         prompt="必ず日本語で回答してください。",
     )
 
     procedure = state.procedure
     # Run the agent
-    message = HumanMessage(
-        content=[
-            {"type":"text","text":procedure},
-            {
-                "type":"image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_data}"
-                }
-            }
-        ]
-    )
+    if image_data:
+        message = HumanMessage(
+            content=[
+                {"type":"text","text":procedure},
+                *[{"type":"image_url","image_url": {"url": f"data:image/jpeg;base64,{image}"}} for image in image_data]
+            ]
+        )
+    else:
+        message = HumanMessage(
+            content=[
+                {"type":"text","text":procedure}
+            ]
+        )
 
     inputs = {"messages": [message]}
     result = agent.invoke(inputs)
 
     # Update state with new messages and incremented count
-    return {"messages": result["messages"], "iteration_count": current_iteration, "iter_data": {"iter_id":current_iteration, "messages": result["messages"]}}
+    return {"messages": result["messages"], "iteration_count": current_iteration, "max_iterations": sample_num, "iter_data": {"iter_id":current_iteration, "messages": result["messages"]}}

@@ -48,10 +48,8 @@
 
 ## 4. 残課題・注意点
 
-*   **Poetry の PATH 問題:**
-    *   環境変数 `PATH` が正しく設定・反映されず、`poetry` コマンドを直接実行できない問題は未解決。
-    *   **当面の対応:** Poetry コマンドはフルパス (`C:\Users\nyham\AppData\Roaming\Python\Scripts\poetry`) で実行する必要がある。
-    *   **恒久対策:** PC の再起動、システム環境変数への設定、PowerShell プロファイルの確認などで解決する可能性がある。
+*   **Poetry の PATH 問題:** (解決済み)
+    *   Windows の環境変数 `PATH` に `C:\Users\nyham\AppData\Roaming\Python\Scripts` を正しく設定し、PCを再起動することで `poetry` コマンドが直接実行できるようになりました。以前のフルパス指定は不要です。
 *   **Python 3.13 の利用:**
     *   現在プロジェクトは Python 3.13 で動作しているが、`pyproject.toml` で当初 `^3.11` が指定されていた。
     *   Python 3.13 は比較的新しいため、一部ライブラリとの互換性問題が今後も発生する可能性がある。より安定した LTS バージョン (例: 3.11) への切り替えも検討の余地がある。
