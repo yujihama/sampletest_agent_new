@@ -22,6 +22,7 @@ langgraph-cli = {extras = ["inmem"], version = "^0.2.10"}
 pydantic = "^2.7.0"
 pymupdf = "^1.25.5"
 langchain-community = "^0.3.24"
+fastapi = "^0.109.2"
 
 [tool.poetry.group.dev.dependencies]
 mypy = ">=1.11.1"
