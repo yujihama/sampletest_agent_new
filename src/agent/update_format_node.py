@@ -54,11 +54,4 @@ def update_format_node(state: State) -> dict:
 
     df = pd.DataFrame(data_for_df)
     
-    print("Created DataFrame:")
-    print(df)
-
-    # Here you could save the DataFrame to a file (e.g., Excel using state.format_path)
-    # or update the state with the DataFrame if needed in subsequent steps.
-    # For now, we just print it.
-
-    return {} # Return empty dict as we are not updating the state fields directly here
+    return {"df": df.to_dict(orient="records")} # Return empty dict as we are not updating the state fields directly here
