@@ -5,6 +5,8 @@ from typing import Any, Dict
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage, HumanMessage
 import langchain
+from langchain_community.tools import tool
+from langchain_openai import ChatOpenAI
 
 from langgraph.prebuilt.interrupt import (
     ActionRequest,
@@ -56,28 +58,6 @@ def query_to_human(query: str) -> str:
     
     return message
 
-def analyze_image(image_data_num: int, query: str) -> str:
-    """
-    画像データを分析する。何枚目の画像について、何を確認したいか明確に伝えることが必要。
-    arg:
-        image_data_num: 何枚目の画像について知りたいか数字で指定
-        query: 確認したい内容
-    return:
-        str: 分析結果
-    """
-    image_data_base64 = state.image_data[image_data_num-1]
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    message = HumanMessage(
-            content=[
-                {"type":"text","text":query},
-                {"type":"image_url","image_url": {"url": f"data:image/jpeg;base64,{image_data_base64}"}}
-            ]
-        )
-    inputs = {"messages": [message]}
-    result = llm.invoke(inputs)
-    print(f"result: {result}")
-    return result.content
-
 def get_base64_from_image(image_path: str) -> str:
     """
     画像ファイルを読み込み、base64エンコードされた文字列を返す関数
@@ -101,6 +81,7 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
         sample_num = len(os.listdir(data_path))
 
     image_data = []
+    txt_data = []
     if state.sample_data_path:
         sample_data = os.listdir(data_path)[current_iteration-1]
         print(f"sample_data: {sample_data}")
@@ -120,20 +101,53 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
                 doc.close()
             elif file.endswith(".jpg") or file.endswith(".png"):
                 image_data.append(get_base64_from_image(file_path))
+            else:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    txt_data.append(f.read())
                 
+    # analyze_image_tool を react_node のスコープ内で定義し、image_data をクロージャでキャプチャ
+    @tool
+    def analyze_image_tool(image_data_num: int, query: str) -> str:
+        """
+        画像データを分析する。何枚目の画像について、何を確認したいか明確に伝えることが必要。
+        arg:
+            image_data_num: 何枚目の画像について知りたいか数字で指定 (1-indexed)
+            query: 確認したい内容
+        return:
+            str: 分析結果
+        """
+        nonlocal image_data # react_node スコープの image_data を参照
+        if not image_data or not (0 < image_data_num <= len(image_data)):
+            return "指定された番号の画像データが見つからないか、番号が範囲外です。"
+        
+        image_data_base64 = image_data[image_data_num-1]
+        
+        llm_for_tool = ChatOpenAI(model="gpt-4.1-mini") 
+        tool_message_content = HumanMessage(
+            content=[
+                {"type": "text", "text": query},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data_base64}"}}
+            ]
+        )
+        inputs_for_llm = {"messages": [tool_message_content]}
+        result = llm_for_tool.invoke(inputs_for_llm)
+        # print(f"analyze_image_tool result: {result.content}") # デバッグ用
+        return result.content
+
     agent = create_react_agent(
-        model="gpt-4o-mini",
-        state_schema = {"image_data": image_data},
-        tools=[query_to_human, analyze_image],
-        prompt="必ず日本語で回答してください。",
+        model="gpt-4.1-mini",
+        tools=[query_to_human, analyze_image_tool], # 修正: analyze_image_tool を使用
+        prompt="必ず日本語で回答してください。不明点がある場合は人間に問い合わせてください。",
     )
 
     procedure = state.procedure
+    format = "以下のフォーマットに従って回答してください。\n" + "・結果:<OK/NG/NA>\n" + "・根拠:\n" 
     # Run the agent
     if image_data:
+        procedure_with_txtdata = "以下の手続きを実施し、結果と根拠を明確に示してください。\n" + procedure + "\n" + format + "\n" + "以下はこの手続きに使用するテキストデータです。\n" + "\n".join(txt_data)
         message = HumanMessage(
             content=[
-                {"type":"text","text":procedure},
+                {"type":"text","text":procedure_with_txtdata},
                 *[{"type":"image_url","image_url": {"url": f"data:image/jpeg;base64,{image}"}} for image in image_data]
             ]
         )

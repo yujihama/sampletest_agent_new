@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useThreadsContext } from "../contexts/ThreadContext";
 import { createClient } from "@/lib/client";
@@ -59,9 +59,7 @@ export function GraphExecutionPanel() {
   const { agentInboxes } = useThreadsContext();
   const selectedInbox = agentInboxes.find((i) => i.selected);
   const [graphId, setGraphId] = useState(selectedInbox?.graphId || "");
-  const [inputJson, setInputJson] = useState(() =>
-    JSON.stringify({ procedure: "2025年のデータか確認してください。", sample_data_path: "" }, null, 2)
-  );
+  const [procedureInput, setProcedureInput] = useState<string>("2025年のデータか確認してください。");
   const [rawResult, setRawResult] = useState<any>(null);
   const [dataFrameResult, setDataFrameResult] = useState<Record<string, any>[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,9 +73,6 @@ export function GraphExecutionPanel() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFileNames, setSelectedFileNames] = useState<string[]>([]);
-
-  // 除外するキー
-  const EXCLUDE_KEYS = ["messages", "max_iterations", "iteration_count"];
 
   const client = React.useMemo(() => {
     if (!selectedInbox?.deploymentUrl) return null;
@@ -253,11 +248,8 @@ export function GraphExecutionPanel() {
   // ★ resetToNewExecutionState 関数の定義
   const resetToNewExecutionState = () => {
     setSelectedHistoryRunId(null);
-    setGraphId(selectedInbox?.graphId || ""); 
-    setInputJson(JSON.stringify({
-      procedure: "2025年のデータか確認してください。",
-      sample_data_path: selectedFolder || ""
-    }, null, 2));
+    setGraphId(selectedInbox?.graphId || "");
+    setProcedureInput("2025年のデータか確認してください。");
     setRawResult(null);
     setDataFrameResult(null);
   };
@@ -283,18 +275,14 @@ export function GraphExecutionPanel() {
         setIsLoading(false);
         return;
       }
-      let inputObj;
-      try {
-        inputObj = JSON.parse(inputJson);
-      } catch (_parseError: any) {
-        toast({
-          title: "入力エラー",
-          description: "入力データは正しいJSON形式で入力してください。",
-          variant: "destructive",
-        });
-        setIsLoading(false);
-        return;
-      }
+
+      // procedureInput と selectedFolder から inputObj を構築
+      const inputObj: Record<string, any> = {
+        procedure: procedureInput,
+        sample_data_path: selectedFolder || ""
+      };
+      // EXCLUDE_KEYS をここで適用する場合 (もしサーバーサイドで期待されるなら)
+      // EXCLUDE_KEYS.forEach(k => { delete inputObj[k]; });
 
       let newThreadResponse: { thread_id: string; [key: string]: any };
       try {
@@ -476,10 +464,20 @@ export function GraphExecutionPanel() {
     setSelectedHistoryRunId(selectedRunId);
     const historyEntry = executionHistory.find(entry => entry.runId === selectedRunId);
 
-    if (historyEntry && client) { 
+    if (historyEntry && client) {
       setGraphId(historyEntry.graphId);
-      setInputJson(JSON.stringify(historyEntry.input, null, 2));
-      setIsLoading(true); 
+      // setInputJson(JSON.stringify(historyEntry.input, null, 2));
+      // historyEntry.input はオブジェクトのはずなので、そこから procedure と sample_data_path を取得
+      if (historyEntry.input && typeof historyEntry.input === 'object') {
+        setProcedureInput(historyEntry.input.procedure || "");
+        setSelectedFolder(historyEntry.input.sample_data_path || "");
+      } else {
+        // もし input が文字列や予期せぬ形式なら、デフォルト値を設定するかエラー処理
+        setProcedureInput("");
+        setSelectedFolder("");
+        console.warn("History entry input is not an object or is missing:", historyEntry.input);
+      }
+      setIsLoading(true);
       setRawResult(null);    
       setDataFrameResult(null);
 
@@ -528,36 +526,6 @@ export function GraphExecutionPanel() {
     } else {
       resetToNewExecutionState(); // 履歴が見つからない場合など
     }
-  };
-
-  // データフォルダ選択時にinputJsonへ反映（除外キーも適用）
-  useEffect(() => {
-    if (!selectedFolder) return;
-    setInputJson(prev => {
-      let obj: any;
-      try {
-        obj = JSON.parse(prev);
-      } catch {
-        obj = {};
-      }
-      // 除外キーを削除
-      EXCLUDE_KEYS.forEach(k => { delete obj[k]; });
-      obj.sample_data_path = selectedFolder;
-      return JSON.stringify(obj, null, 2);
-    });
-  }, [selectedFolder]);
-
-  // 入力欄編集時も除外キーを自動削除
-  const handleInputJsonChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    let obj: any;
-    try {
-      obj = JSON.parse(e.target.value);
-    } catch {
-      setInputJson(e.target.value); // パースできない場合はそのまま
-      return;
-    }
-    EXCLUDE_KEYS.forEach(k => { delete obj[k]; });
-    setInputJson(JSON.stringify(obj, null, 2));
   };
 
   return (
@@ -643,16 +611,13 @@ export function GraphExecutionPanel() {
       </div>
       <div>
         <label className="text-sm font-medium">手続入力データ</label>
-        <Textarea
-          value={inputJson}
-          onChange={handleInputJsonChange}
-          rows={4} 
-          placeholder={JSON.stringify({
-            procedure: "2025年のデータか確認してください。",
-            sample_data_path: ""
-          }, null, 2)}
+        <Input
+          type="text"
+          value={procedureInput}
+          onChange={(e) => setProcedureInput(e.target.value)}
+          placeholder="例: 2025年のデータか確認してください。"
           className="mt-1"
-          disabled={!!selectedHistoryRunId} 
+          disabled={!!selectedHistoryRunId}
         />
       </div>
       <Button onClick={handleRun} disabled={isLoading || !!selectedHistoryRunId} className="w-full">
