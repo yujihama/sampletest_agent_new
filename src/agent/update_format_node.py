@@ -1,25 +1,37 @@
+import logging
 from langgraph.prebuilt import create_react_agent
 from agent.state import State
 from langchain_core.runnables import RunnableConfig
-from typing import Any, Dict
+from typing import Any, Dict, List
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
-import langchain
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field, RootModel
+import json
 
 import base64
 import os
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+class CellValue(BaseModel):
+    cell_id: str
+    value: str
+
+class CellValueList(BaseModel):
+    items: List[CellValue]
 
 def update_format_node(state: State) -> dict:
     """
     Extracts iteration data from the state and converts it into a Pandas DataFrame.
     Currently, it prints the DataFrame for verification.
     """
-    print("--- Updating Format ---")
+    logger.info("--- Updating Format ---")
     iter_data = state.iter_data
     
     if not iter_data:
-        print("No iteration data found.")
+        logger.info("No iteration data found.")
         return {} # 状態は変更しない
 
     # Prepare data for DataFrame
@@ -47,11 +59,33 @@ def update_format_node(state: State) -> dict:
         # Add other relevant message info if needed
             
         data_for_df.append({
-            "iteration": iter_id,
-            "last_message_content": content,
+            "sample_data": iter_id,
+            "result": content,
             # Add other fields extracted from messages if necessary
         })
 
     df = pd.DataFrame(data_for_df)
-    
-    return {"df": df.to_dict(orient="records")} # Return empty dict as we are not updating the state fields directly here
+    format_file = state.excel_format_json_path
+    with open(format_file, "r", encoding="utf-8") as f:
+        format_json = f.read()
+
+    # LLMに、各セルにどのようなデータを記入するか回答させる
+    llm = ChatOpenAI(model="gpt-4.1-mini")
+    prompt = f"""
+    以下の形式で、各セル番号（cell_id）と記入すべき値（value）のペアをリストで出力してください。
+    例:
+    {{
+      \"items\": [
+        {{"cell_id": "C3", "value": "テスト名の例"}},
+        {{"cell_id": "C4", "value": "2024-06-01"}}
+      ]
+    }}
+    セル情報:
+    {format_json}
+    データ:
+    {df.to_dict(orient="records")}
+    """
+    response = llm.with_structured_output(CellValueList).invoke(prompt)
+    logger.info(response.items)
+
+    return {"df": df.to_dict(orient="records"), "result": response.items}

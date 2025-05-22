@@ -19,6 +19,9 @@ import httpx
 import base64
 import os
 import fitz
+import logging
+
+logger = logging.getLogger(__name__)
 
 def query_to_human(query: str) -> str:
     """
@@ -74,7 +77,7 @@ def get_base64_from_image(image_path: str) -> str:
 def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
     # Increment iteration count
     current_iteration = int(state.iteration_count) + 1
-    print(f"--- Iteration {current_iteration}/{state.max_iterations} ---")
+    logger.info(f"--- Iteration {current_iteration}/{state.max_iterations} ---")
 
     if state.sample_data_path:
         data_path = os.path.join("C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample",state.sample_data_path)
@@ -84,14 +87,14 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
     txt_data = []
     if state.sample_data_path:
         sample_data = os.listdir(data_path)[current_iteration-1]
-        print(f"sample_data: {sample_data}")
+        logger.info(f"sample_data: {sample_data}")
         for file in os.listdir(os.path.join(data_path, sample_data)):
             file_path = os.path.join(data_path, sample_data, file)
-            print(f"file_path: {file_path}")
+            logger.info(f"file_path: {file_path}")
             if file.endswith(".pdf"):
                 # PyMuPDFでPDFをページごとに画像化
                 doc = fitz.open(file_path)
-                print(f"doc_length: {len(doc)}")
+                logger.info(f"doc_length: {len(doc)}")
                 for page in doc[:5]:
                     pix = page.get_pixmap()
                     # メモリ上でPNGバイト列に変換

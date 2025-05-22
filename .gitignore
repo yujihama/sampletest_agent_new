@@ -166,3 +166,5 @@ uv.lock
 
 node_modules/
 .next/
+
+data/

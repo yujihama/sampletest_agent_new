@@ -483,7 +483,12 @@ export function GraphExecutionPanel() {
 
       try {
         const threadState = await client.threads.getState(historyEntry.threadId);
-        const finalStateForDisplay = threadState?.values || threadState;
+        let finalStateForDisplay;
+        if (threadState?.values && Object.keys(threadState.values).length > 0) {
+          finalStateForDisplay = threadState.values;
+        } else {
+          finalStateForDisplay = threadState;
+        }
         setRawResult(finalStateForDisplay);
 
         // executionHistory の output を更新 (任意だが、再選択時のAPI負荷軽減)
