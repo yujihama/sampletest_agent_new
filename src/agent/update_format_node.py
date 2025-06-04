@@ -93,7 +93,13 @@ def update_format_node(state: State) -> dict:
         logger.error(f"Excelファイルのコピー中にエラーが発生しました: {e}")
         return {"error": f"Failed to copy Excel file: {e}"}
 
-    with open(state.excel_format_json_path, "r", encoding="utf-8") as f: # これはLLMへの入力なので元のまま
+    # excel_format_json_path が存在するか確認してから読み込む
+    json_path = state.excel_format_json_path
+    if not json_path or not os.path.exists(json_path):
+        logger.error(f"Excel format JSON file not found: {json_path}")
+        return {"error": "Excel format JSON file not found."}
+
+    with open(json_path, "r", encoding="utf-8") as f:  # これはLLMへの入力なので元のまま
         format_json_for_llm = f.read()
 
     # LLMに、各セルにどのようなデータを記入するか回答させる
