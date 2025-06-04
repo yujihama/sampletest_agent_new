@@ -1,9 +1,10 @@
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
 from agent.state import State
 from langchain_core.runnables import RunnableConfig
-from typing import Any, Dict
+from typing import Any, Dict, Sequence, TypedDict, Union
 from langgraph.types import Command
-from langchain_core.messages import ToolMessage, HumanMessage
+from langchain_core.messages import ToolMessage, HumanMessage, BaseMessage
 import langchain
 from langchain_community.tools import tool
 from langchain_openai import ChatOpenAI
@@ -21,12 +22,37 @@ import os
 import fitz
 import logging
 
+from langgraph.graph.message import add_messages
+from langgraph.managed import IsLastStep, RemainingSteps
+from typing_extensions import Annotated
+
 logger = logging.getLogger(__name__)
 
-def query_to_human(query: str) -> str:
+StructuredResponse = Union[dict, BaseModel]
+class AgentState_custom(TypedDict):
+    """The state of the agent."""
+
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    is_last_step: IsLastStep
+    remaining_steps: RemainingSteps
+    structured_response: StructuredResponse
+    thought: str = Field(description="思考")
+
+class Result(BaseModel):
+    reason: str = Field(description="判断根拠")
+    support_data: str = Field(description="根拠を裏付けるデータ")
+    result: str = Field(description="結果(OK/NG/NA)")
+
+def query_to_human(query: str, purpose: str) -> str:
     """
-    上位者への問い合わせを行う。
+    他の手段で回答に必要な情報を取得できない場合に、人間に問い合わせる。
     どのデータについて、何を確認したいか明確に伝えることが必要。
+
+    arg:
+        query: 問い合わせ内容
+        purpose: このツールを呼ぶ意図・目的
+    return:
+        str: 問い合わせ結果
     """
     action_request = ActionRequest(
         action="Confirm Message",
@@ -110,12 +136,13 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
                 
     # analyze_image_tool を react_node のスコープ内で定義し、image_data をクロージャでキャプチャ
     @tool
-    def analyze_image_tool(image_data_num: int, query: str) -> str:
+    def analyze_image_tool(image_data_num: int, query: str, purpose: str) -> str:
         """
         画像データを分析する。何枚目の画像について、何を確認したいか明確に伝えることが必要。
         arg:
             image_data_num: 何枚目の画像について知りたいか数字で指定 (1-indexed)
             query: 確認したい内容
+            purpose: このツールを呼ぶ意図・目的
         return:
             str: 分析結果
         """
@@ -132,19 +159,20 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data_base64}"}}
             ]
         )
-        inputs_for_llm = {"messages": [tool_message_content]}
-        result = llm_for_tool.invoke(inputs_for_llm)
+        result = llm_for_tool.invoke([tool_message_content])
         # print(f"analyze_image_tool result: {result.content}") # デバッグ用
         return result.content
 
     agent = create_react_agent(
         model="gpt-4.1-mini",
-        tools=[query_to_human, analyze_image_tool], # 修正: analyze_image_tool を使用
-        prompt="必ず日本語で回答してください。不明点がある場合は人間に問い合わせてください。",
+        tools=[query_to_human, analyze_image_tool],
+        prompt="必ず日本語で回答してください。",
+        state_schema=AgentState_custom,
+        response_format=Result
     )
 
     procedure = state.procedure
-    format = "以下のフォーマットに従って回答してください。\n" + "・結果:<OK/NG/NA>\n" + "・根拠:\n" 
+    format = "以下のフォーマットに従って回答してください。"
     # Run the agent
     if image_data:
         procedure_with_txtdata = "以下の手続きを実施し、結果と根拠を明確に示してください。\n" + procedure + "\n" + format + "\n" + "以下はこの手続きに使用するテキストデータです。\n" + "\n".join(txt_data)
@@ -155,14 +183,18 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
             ]
         )
     else:
+        procedure_with_txtdata = "以下の手続きを実施し、結果と根拠を明確に示してください。\n" + procedure + "\n" + format + "\n" + "以下はこの手続きに使用するテキストデータです。\n" + "\n".join(txt_data)
         message = HumanMessage(
             content=[
-                {"type":"text","text":procedure}
+                {"type":"text","text":procedure_with_txtdata}
             ]
         )
 
     inputs = {"messages": [message]}
     result = agent.invoke(inputs)
 
+    eval_prompt = "以下は監査結果が論理的に妥当な内容か評価してください。\n" + f"監査手続き:{procedure}\n" + "以下は監査結果です。\n" + str(result["structured_response"])
+    eval_result = agent.invoke({"messages": [("human", eval_prompt)]})
+
     # Update state with new messages and incremented count
-    return {"messages": result["messages"], "iteration_count": current_iteration, "max_iterations": sample_num, "iter_data": {"iter_id":current_iteration, "messages": result["messages"]}}
+    return {"messages": result["messages"], "iteration_count": current_iteration, "max_iterations": sample_num, "iter_data": {"iter_id":current_iteration, "result": result["structured_response"]}}

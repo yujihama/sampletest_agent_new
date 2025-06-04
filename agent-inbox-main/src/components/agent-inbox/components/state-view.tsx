@@ -147,20 +147,42 @@ function StateViewRecursive(props: StateViewRecursiveProps) {
         {/* Vertical line */}
         <div className="absolute left-[-24px] top-0 h-full w-[1px] bg-gray-200" />
 
-        {Object.entries(props.value).map(([key, value], idx) => (
-          <div
-            key={`state-view-object-${key}-${idx}`}
-            className="relative w-full"
-          >
-            {/* Horizontal connector line */}
-            <div className="absolute left-[-20px] top-[10px] h-[1px] w-[18px] bg-gray-200" />
-            <StateViewObject
-              expanded={props.expanded}
-              keyName={key}
-              value={value}
-            />
-          </div>
-        ))}
+        {Object.entries(props.value).map(([key, value], idx) => {
+          if (key === "output_excel_path" && typeof value === "string" && value) {
+            const filePath = value;
+            const fileName = filePath.split("/").pop() || filePath.split("\\").pop() || "download";
+            return (
+              <div key={`state-view-object-${key}-${idx}`} className="relative w-full pl-1">
+                {/* Horizontal connector line - adjusted for direct rendering */}
+                <div className="absolute left-[-20px] top-[10px] h-[1px] w-[18px] bg-gray-200" /> 
+                <div className="flex flex-row gap-1 items-center">
+                  <p className="font-semibold text-black">{prettifyText(key)}:</p>
+                  <a
+                    href={filePath}
+                    download={fileName}
+                    className="font-light text-blue-600 hover:underline"
+                  >
+                    {fileName}
+                  </a>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div
+              key={`state-view-object-${key}-${idx}`}
+              className="relative w-full"
+            >
+              {/* Horizontal connector line */}
+              <div className="absolute left-[-20px] top-[10px] h-[1px] w-[18px] bg-gray-200" />
+              <StateViewObject
+                expanded={props.expanded}
+                keyName={key}
+                value={value}
+              />
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -200,6 +222,13 @@ export function StateViewObject(props: StateViewProps) {
       setExpanded(props.expanded);
     }
   }, [props.expanded]);
+
+  const valueIsExpandable =
+    typeof props.value === "object" ||
+    typeof props.value === "string" ||
+    typeof props.value === "number" ||
+    typeof props.value === "boolean" ||
+    Array.isArray(props.value);
 
   return (
     <div className="flex flex-row gap-2 items-start justify-start relative text-sm">

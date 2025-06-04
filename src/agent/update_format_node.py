@@ -8,6 +8,8 @@ from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, RootModel
 import json
+import shutil # shutil をインポート
+from datetime import datetime # datetime をインポート
 
 import base64
 import os
@@ -38,54 +40,110 @@ def update_format_node(state: State) -> dict:
     data_for_df = []
     for item in iter_data:
         iter_id = item.get("iter_id")
-        messages = item.get("messages", [])
+        result = item.get("result")
+        # messages = item.get("messages", [])
         
-        # Extract content from messages (assuming the last message is most relevant, or adjust as needed)
-        last_message = messages[-1] if messages else None
-        content = ""
-        if isinstance(last_message, AIMessage):
-            content = last_message.content
-        elif isinstance(last_message, HumanMessage):
-            # HumanMessage can have complex content (text, image_url list)
-            if isinstance(last_message.content, str):
-                content = last_message.content
-            elif isinstance(last_message.content, list):
-                 # Extract text part if available
-                 text_parts = [part.get("text") for part in last_message.content if isinstance(part, dict) and part.get("type") == "text"]
-                 content = "\\n".join(filter(None, text_parts))
-        elif isinstance(last_message, ToolMessage):
-            content = f"Tool Call: {last_message.tool_call_id}, Output: {last_message.content}"
+        # # Extract content from messages (assuming the last message is most relevant, or adjust as needed)
+        # last_message = messages[-1] if messages else None
+        # content = ""
+        # if isinstance(last_message, AIMessage):
+        #     content = last_message.content
+        # elif isinstance(last_message, HumanMessage):
+        #     # HumanMessage can have complex content (text, image_url list)
+        #     if isinstance(last_message.content, str):
+        #         content = last_message.content
+        #     elif isinstance(last_message.content, list):
+        #          # Extract text part if available
+        #          text_parts = [part.get("text") for part in last_message.content if isinstance(part, dict) and part.get("type") == "text"]
+        #          content = "\\n".join(filter(None, text_parts))
+        # elif isinstance(last_message, ToolMessage):
+        #     content = f"Tool Call: {last_message.tool_call_id}, Output: {last_message.content}"
             
         # Add other relevant message info if needed
             
         data_for_df.append({
             "sample_data": iter_id,
-            "result": content,
-            # Add other fields extracted from messages if necessary
+            "result": result.result,
+            "reason": result.reason,
+            "support_data": result.support_data
         })
 
     df = pd.DataFrame(data_for_df)
-    format_file = state.excel_format_json_path
-    with open(format_file, "r", encoding="utf-8") as f:
-        format_json = f.read()
+    # format_file = state.excel_format_json_path # 旧JSONパスの使用をコメントアウト
+    
+    # state.format_path がExcelテンプレートファイルのパスと仮定
+    original_format_path = state.format_path 
+    if not original_format_path or not os.path.exists(original_format_path):
+        logger.error(f"元のExcelフォーマットファイルが見つかりません: {original_format_path}")
+        # 適切なエラー処理、または例外を送出
+        return {"error": "Original format file not found."}
+
+    # 実行時刻をファイル名に付加
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    file_name, file_extension = os.path.splitext(original_format_path)
+
+    output_dir = state.output_dir
+    new_file_basename = f"{os.path.basename(file_name)}_{timestamp}{file_extension}"
+    new_format_file_path = os.path.join(output_dir, new_file_basename)
+
+    try:
+        shutil.copy2(original_format_path, new_format_file_path) # メタデータもコピー
+        logger.info(f"Excelフォーマットをコピーしました: {original_format_path} -> {new_format_file_path}")
+    except Exception as e:
+        logger.error(f"Excelファイルのコピー中にエラーが発生しました: {e}")
+        return {"error": f"Failed to copy Excel file: {e}"}
+
+    with open(state.excel_format_json_path, "r", encoding="utf-8") as f: # これはLLMへの入力なので元のまま
+        format_json_for_llm = f.read()
 
     # LLMに、各セルにどのようなデータを記入するか回答させる
-    llm = ChatOpenAI(model="gpt-4.1-mini")
+    llm = ChatOpenAI(model="gpt-4.1")
     prompt = f"""
+    あなたは内部監査のデータ入力担当者です。監査結果データをよく読み、
     以下の形式で、各セル番号（cell_id）と記入すべき値（value）のペアをリストで出力してください。
-    例:
+    情報が不足していて記入できないセルはブランクを設定してください。
+    # 出力例:
     {{
       \"items\": [
-        {{"cell_id": "C3", "value": "テスト名の例"}},
-        {{"cell_id": "C4", "value": "2024-06-01"}}
+        {{"cell_id": "C3", "value": "XXXとXXXの確認結果"}},
+        {{"cell_id": "C4", "value": "2024-06-01"}},
+        {{"cell_id": "C5", "value": ""}},※情報が不足していて記入できないセルはブランクを設定
       ]
     }}
-    セル情報:
-    {format_json}
-    データ:
+    
+    # セル情報:
+    {format_json_for_llm}
+
+    # メタデータ:
+     - 本日の日付: {datetime.now().strftime("%Y-%m-%d")}
+     - 監査手続き名: {state.procedure}
+     - 監査実施社: generated by LLM
+     - サンプルデータ名: {state.sample_data_path}
+
+    # 監査結果データ:
     {df.to_dict(orient="records")}
     """
     response = llm.with_structured_output(CellValueList).invoke(prompt)
     logger.info(response.items)
 
-    return {"df": df.to_dict(orient="records"), "result": response.items}
+    # エクセルフォーマットを更新
+    try:
+        import openpyxl
+        workbook = openpyxl.load_workbook(new_format_file_path)
+        sheet = workbook.active
+
+        for item in response.items:
+            sheet[item.cell_id] = item.value
+
+        workbook.save(new_format_file_path)
+        logger.info(f"コピー先のExcelファイルのセルを更新しました: {new_format_file_path}")
+    except FileNotFoundError:
+        logger.error(f"コピー先のExcelファイルが見つかりません: {new_format_file_path}")
+        # ここで適切なエラー処理を行うか、例外を再発生させる
+        raise
+    except Exception as e:
+        logger.error(f"Excelファイルの更新中にエラーが発生しました: {new_format_file_path},エラー: {e}")
+        # ここで適切なエラー処理を行うか、例外を再発生させる
+        raise
+
+    return {"df": df.to_dict(orient="records"), "result": response.items, "output_excel_path": new_format_file_path}

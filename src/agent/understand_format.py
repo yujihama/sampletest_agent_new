@@ -6,6 +6,7 @@ import os
 import json
 import base64
 import logging
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Any, TypedDict, Annotated, Literal, Optional
 
@@ -36,6 +37,7 @@ class ExcelField(BaseModel):
 class ExcelFormFields(BaseModel):
     """Excelフォームの入力欄情報のコレクション"""
     fields: List[ExcelField] = Field(..., description="検出された入力欄のリスト")
+    
 
 # Pydanticモデル: 検証結果
 class ValidationResult(BaseModel):
@@ -62,6 +64,7 @@ class ExcelFormState(TypedDict):
     final_json: str
     status: Literal["進行中", "完了", "エラー"]
     error_message: str
+    temp_excel_for_capture: str
 
 # 1. Excelデータのテキスト化と画像キャプチャ
 def extract_excel_data_and_capture(state: ExcelFormState) -> ExcelFormState:
@@ -69,31 +72,65 @@ def extract_excel_data_and_capture(state: ExcelFormState) -> ExcelFormState:
     Excelファイルからテキストデータを抽出し、画像キャプチャを取得する
     """
     logger.info(f"Excelテキスト抽出と画像キャプチャ開始: {state['excel_file']}")
-    
+    temp_excel_file_for_capture_path = None # finallyで使うため、ここで定義
+
     try:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
         final_output_dir = base_save_path / "format_data"
         final_output_dir.mkdir(exist_ok=True, parents=True)
         
-        # キャプチャ用ディレクトリの作成 (final_output_dir の下に captures を作成)
+        # キャプチャ用ディレクトリ作成
         captures_dir = final_output_dir / "captures"
         captures_dir.mkdir(exist_ok=True, parents=True)
+
+        # キャプチャ前に既存のPNGファイルを削除
+        for png_file in captures_dir.glob("*.png"):
+            try:
+                png_file.unlink()
+                logger.info(f"既存のキャプチャファイルを削除: {png_file}")
+            except Exception as e:
+                logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
         
-        # Excelファイルを開く
-        workbook = openpyxl.load_workbook(state["excel_file"])
+        # Excelファイルを開く (テキスト抽出用)
+        workbook_orig = openpyxl.load_workbook(state["excel_file"])
         
+        # キャプチャ用にExcelを準備 (印刷範囲設定)
+        workbook_for_capture = openpyxl.load_workbook(state["excel_file"])
+        
+        try:
+            for sheet_capture in workbook_for_capture:
+                try:
+                    dimension = sheet_capture.calculate_dimension()
+                    if dimension:
+                        sheet_capture.print_area = dimension
+                        logger.info(f"シート '{sheet_capture.title}' の印刷範囲を {dimension} に設定しました")
+                except Exception as e_dim:
+                    logger.warning(f"シート '{sheet_capture.title}' の印刷範囲設定エラー: {e_dim}")
+
+            # 印刷範囲設定済みのExcelを一時ファイルに保存
+            # delete=False にして、sofficeがファイルを使用後に手動で削除
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="capture_") as tmp_excel_file:
+                workbook_for_capture.save(tmp_excel_file.name)
+                temp_excel_file_for_capture_path = tmp_excel_file.name # finally節で使うためにパスを保存
+            
+            logger.info(f"印刷範囲設定済みのExcelを一時ファイル '{temp_excel_file_for_capture_path}' に保存しました。")
+
+        except Exception as e_save:
+            logger.error(f"一時Excelファイルの保存中にエラーが発生しました: {e_save}")
+            raise 
+
         # 抽出結果を格納するテキスト
         extracted_text = ""
         
-        # 各シートの処理
-        for sheet_name in workbook.sheetnames:
-            sheet = workbook[sheet_name]
+        # 各シートの処理 (workbook_orig を使用)
+        for sheet_name in workbook_orig.sheetnames:
+            sheet = workbook_orig[sheet_name]
             
             # シート名の追加
             extracted_text += f"## シート名: {sheet_name}\n"
@@ -141,46 +178,60 @@ def extract_excel_data_and_capture(state: ExcelFormState) -> ExcelFormState:
         
         logger.info(f"Excelテキスト抽出完了: {extracted_text_file}")
         
-        # 元のExcelファイルのキャプチャを取得
-        # 一時ファイルにコピー (final_output_dir の下に保存)
-        temp_excel = final_output_dir / "original_excel.xlsx"
-        with open(state["excel_file"], "rb") as src, open(temp_excel, "wb") as dst:
-            dst.write(src.read())
+        original_capture_path = None
+        if temp_excel_file_for_capture_path and os.path.exists(temp_excel_file_for_capture_path):
+            command = f"soffice --headless --convert-to png \"{str(temp_excel_file_for_capture_path)}\" --outdir \"{str(captures_dir)}\""
+            logger.info(f"実行コマンド: {command}")
+            subprocess.run(command, shell=True, check=True)
+            
+            temp_excel_basename = os.path.splitext(os.path.basename(temp_excel_file_for_capture_path))[0]
+            expected_capture_name = f"{temp_excel_basename}.png"
+            generated_capture_path = captures_dir / expected_capture_name
+
+            if not generated_capture_path.exists():
+                png_files_in_captures_dir = list(captures_dir.glob(f"{temp_excel_basename}*.png")) 
+                if png_files_in_captures_dir:
+                    generated_capture_path = png_files_in_captures_dir[0]
+                    logger.info(f"期待された名前 {expected_capture_name} が見つからず、代わりに {generated_capture_path.name} を使用します。")
+                else: 
+                    logger.warning(f"キャプチャファイル {expected_capture_name} または {temp_excel_basename}*.png が見つかりません。captures_dir: {captures_dir}")
+
+            if generated_capture_path and generated_capture_path.exists():
+                final_capture_name = "original_excel.png"
+                original_capture_path = captures_dir / final_capture_name
+                if generated_capture_path != original_capture_path: 
+                     if original_capture_path.exists(): 
+                        original_capture_path.unlink()
+                     os.rename(generated_capture_path, original_capture_path)
+                logger.info(f"元Excelのキャプチャ完了: {original_capture_path}")
+            else:
+                logger.error(f"SofficeによるPNG変換後、キャプチャファイルが見つかりませんでした。一時ファイル: {temp_excel_file_for_capture_path}")
+        else:
+            logger.warning("印刷範囲設定済みの一時Excelファイルが見つからないため、キャプチャをスキップします。")
         
-        # LibreOfficeを使用してPNGに変換
-        command = f"soffice --headless --convert-to png {temp_excel} --outdir {captures_dir}"
-        logger.info(f"実行コマンド: {command}")
-        subprocess.run(command, shell=True, check=True)
-        
-        # 生成されたPNGファイルのパスを取得
-        original_capture = captures_dir / "original_excel.png"
-        if not original_capture.exists():
-            # ファイル名が変更されている可能性があるため、キャプチャディレクトリ内のPNGファイルを探す
-            png_files = list(captures_dir.glob("*.png"))
-            if png_files:
-                original_capture = png_files[0]
-                # 標準的な名前にリネーム
-                new_path = captures_dir / "original_excel.png"
-                os.rename(original_capture, new_path)
-                original_capture = new_path
-        
-        logger.info(f"元Excelのキャプチャ完了: {original_capture}")
-        
-        # 状態の更新
         return {
             **state,
             "extracted_text_file": str(extracted_text_file),
-            "original_excel_capture": str(original_capture),
+            "original_excel_capture": str(original_capture_path) if original_capture_path else "", 
             "status": "進行中"
         }
         
     except Exception as e:
         logger.error(f"Excelテキスト抽出と画像キャプチャエラー: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {
             **state,
             "status": "エラー",
-            "error_message": f"Excelテキスト抽出と画像キャプチャエラー: {str(e)}"
+            "error_message": f"Excelテキスト抽出と画像キャプチャエラー: {str(e)}\n{traceback.format_exc()}"
         }
+    finally:
+        if temp_excel_file_for_capture_path and os.path.exists(temp_excel_file_for_capture_path):
+            try:
+                os.remove(temp_excel_file_for_capture_path)
+                logger.info(f"一時ファイル '{temp_excel_file_for_capture_path}' を削除しました。")
+            except Exception as e_remove:
+                logger.warning(f"一時ファイル '{temp_excel_file_for_capture_path}' の削除に失敗しました: {e_remove}")
 
 # 2. マルチモーダルLLMによる入力欄の推定（structured_output使用）
 def estimate_fields_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
@@ -248,7 +299,7 @@ def estimate_fields_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
@@ -294,7 +345,7 @@ def highlight_fields(state: ExcelFormState) -> ExcelFormState:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
@@ -356,43 +407,110 @@ def capture_highlighted_excel(state: ExcelFormState) -> ExcelFormState:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
         final_output_dir = base_save_path / "format_data"
         final_output_dir.mkdir(exist_ok=True, parents=True)
         
-        # captures ディレクトリは final_output_dir の下に作成
+        # キャプチャ用ディレクトリ作成
         captures_dir = final_output_dir / "captures"
         captures_dir.mkdir(exist_ok=True, parents=True)
+
+        # キャプチャ前に既存のPNGファイルを削除
+        for png_file in captures_dir.glob("*.png"):
+            try:
+                png_file.unlink()
+                logger.info(f"既存のキャプチャファイルを削除: {png_file}")
+            except Exception as e:
+                logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
+
+        # ハイライト済みExcelファイルをロードし、印刷範囲を設定
+        highlighted_excel_path_str = state["highlighted_excel"]
+        workbook_hl = openpyxl.load_workbook(highlighted_excel_path_str)
+        sheet_names_for_loop = list(workbook_hl.sheetnames) # PNGループ用にシート名を取得
+
+        for sheet_hl_obj in workbook_hl: # openpyxlのイテレータでシートオブジェクトを取得
+            try:
+                dimension_hl = sheet_hl_obj.calculate_dimension()
+                if dimension_hl:
+                    sheet_hl_obj.print_area = dimension_hl
+                    logger.info(f"ハイライト済みシート '{sheet_hl_obj.title}' の印刷範囲を {dimension_hl} に設定しました")
+            except Exception as e_dim_hl:
+                logger.warning(f"ハイライト済みシート '{sheet_hl_obj.title}' の印刷範囲設定エラー: {e_dim_hl}")
+        
+        workbook_hl.save(highlighted_excel_path_str) # 変更をハイライト済みファイルに保存
         
         # LibreOfficeを使用してPNGに変換
-        highlighted_excel = state["highlighted_excel"]
-        command = f"soffice --headless --convert-to png {highlighted_excel} --outdir {captures_dir}"
+        # highlighted_excel = state["highlighted_excel"] # highlighted_excel_path_str を使用
+        command = f"soffice --headless --convert-to png \"{highlighted_excel_path_str}\" --outdir \"{str(captures_dir)}\""
         
         logger.info(f"実行コマンド: {command}")
         subprocess.run(command, shell=True, check=True)
         
         # 生成されたPNGファイルのパスを取得
-        excel_filename = os.path.basename(highlighted_excel)
+        excel_filename = os.path.basename(highlighted_excel_path_str)
         excel_basename = os.path.splitext(excel_filename)[0]
         
         highlighted_captures = []
-        for sheet_idx, sheet_name in enumerate(openpyxl.load_workbook(highlighted_excel).sheetnames, 1):
-            capture_path = captures_dir / f"{excel_basename}_sheet{sheet_idx}.png"
-            if not capture_path.exists():
-                # ファイル名が変更されている可能性があるため、キャプチャディレクトリ内の最新のPNGファイルを探す
-                png_files = list(captures_dir.glob("*.png"))
-                if png_files:
-                    # 最新のファイルを取得
-                    latest_png = max(png_files, key=os.path.getctime)
-                    # 標準的な名前にリネーム
-                    os.rename(latest_png, capture_path)
-            
+
+        if len(sheet_names_for_loop) == 1:
+            # シートが1枚の場合
+            capture_path = captures_dir / f"{excel_basename}.png"
             if capture_path.exists():
                 highlighted_captures.append(str(capture_path))
-        
+                logger.info(f"単一シートのキャプチャファイルを発見: {capture_path}")
+            else:
+                # soffice がシート名を付与する場合も考慮 (例: excel_basename_Sheet1.png)
+                capture_path_with_sheet_name = captures_dir / f"{excel_basename}_{sheet_names_for_loop[0]}.png"
+                capture_path_with_sheet_index = captures_dir / f"{excel_basename}_sheet1.png" # 1ベースのインデックス
+                capture_path_with_sheet_index_0 = captures_dir / f"{excel_basename}_sheet0.png" # 0ベースのインデックス
+                
+                if capture_path_with_sheet_name.exists():
+                    highlighted_captures.append(str(capture_path_with_sheet_name))
+                    logger.info(f"単一シートのキャプチャファイルを発見 (シート名付き): {capture_path_with_sheet_name}")
+                elif capture_path_with_sheet_index.exists():
+                    highlighted_captures.append(str(capture_path_with_sheet_index))
+                    logger.info(f"単一シートのキャプチャファイルを発見 (シートインデックス付き): {capture_path_with_sheet_index}")
+                elif capture_path_with_sheet_index_0.exists():
+                    highlighted_captures.append(str(capture_path_with_sheet_index_0))
+                    logger.info(f"単一シートのキャプチャファイルを発見 (シートインデックス0付き): {capture_path_with_sheet_index_0}")
+                else:
+                    logger.error(f"単一シートのキャプチャファイルが見つかりません。期待されたパス: {capture_path} または {capture_path_with_sheet_name} や {capture_path_with_sheet_index}")
+        else:
+            # シートが複数枚の場合
+            for sheet_idx, sheet_name in enumerate(sheet_names_for_loop, 1):
+                # LibreOfficeが出力する可能性のあるファイル名パターン
+                # パターン1: <basename>_sheet<N>.png (Nは1から始まる)
+                capture_path_p1 = captures_dir / f"{excel_basename}_sheet{sheet_idx}.png"
+                # パターン2: <basename>-<N>.png (Nは1から始まる)
+                capture_path_p2 = captures_dir / f"{excel_basename}-{sheet_idx}.png"
+                # パターン3: <basename>_<シート名>.png
+                capture_path_p3 = captures_dir / f"{excel_basename}_{sheet_name}.png"
+                # パターン4: <basename>.png (LibreOfficeのバージョンによっては最初のシートのみこの名前になる可能性も稀にある)
+                # このパターンは単一シートの場合に主に処理されるが、複数シートの最初のシートで発生する可能性も考慮するなら、ここでチェックも可能
+                # capture_path_p4 = captures_dir / f"{excel_basename}.png"
+
+                actual_capture_path = None
+                if capture_path_p1.exists():
+                    actual_capture_path = capture_path_p1
+                elif capture_path_p2.exists():
+                    actual_capture_path = capture_path_p2
+                elif capture_path_p3.exists():
+                    actual_capture_path = capture_path_p3
+                # elif sheet_idx == 1 and capture_path_p4.exists(): # もし最初のシートがbasename.pngになる場合
+                #     actual_capture_path = capture_path_p4
+
+                if actual_capture_path:
+                    highlighted_captures.append(str(actual_capture_path))
+                    logger.info(f"シート '{sheet_name}' のキャプチャファイルを発見: {actual_capture_path}")
+                else:
+                    logger.warning(f"シート '{sheet_name}' (インデックス {sheet_idx}) のキャプチャファイルが見つかりません。試行したパターン: {capture_path_p1}, {capture_path_p2}, {capture_path_p3}")
+
+        if not highlighted_captures and sheet_names_for_loop:
+            logger.error(f"ハイライト済みExcelのキャプチャファイルが一つも生成されませんでした。Sofficeのコマンド出力を確認してください。コマンド: {command}")
+            
         logger.info(f"ハイライト済みExcelキャプチャ完了: {highlighted_captures}")
         
         # 状態の更新
@@ -422,7 +540,7 @@ def validate_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
@@ -538,7 +656,7 @@ def correct_fields_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         
@@ -641,7 +759,7 @@ def generate_final_json(state: ExcelFormState) -> ExcelFormState:
         # 実際の保存先ベースディレクトリを決定
         user_defined_output_dir = state.get("output_dir")
         if user_defined_output_dir and str(user_defined_output_dir).strip():
-            base_save_path = user_defined_output_dir
+            base_save_path = Path(user_defined_output_dir)
         else:
             base_save_path = Path(state["excel_file"]).parent
         

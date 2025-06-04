@@ -23,6 +23,7 @@ export function AgentInbox() {
 
   const selectedThreadIdParam = searchParams ? searchParams.get(VIEW_STATE_THREAD_QUERY_PARAM) : null;
   const isStateViewOpen = !!selectedThreadIdParam;
+
   const prevIsStateViewOpen = React.useRef(false);
 
   // Need to track first render to avoid restoring scroll on initial page load

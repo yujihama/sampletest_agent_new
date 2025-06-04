@@ -18,11 +18,11 @@ const DataFrameTable: React.FC<DataFrameTableProps> = ({ data }) => {
 
   return (
     <div className="w-full overflow-x-auto max-w-full">
-      <table className="min-w-full divide-y divide-gray-200 text-sm table-fixed">
+      <table className="min-w-full divide-y divide-gray-200 text-sm">
         <thead className="bg-gray-50">
           <tr>
             {headers.map((header) => (
-              <th key={header} scope="col" className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">
+              <th key={header} scope="col" className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
                 {header}
               </th>
             ))}
@@ -32,7 +32,7 @@ const DataFrameTable: React.FC<DataFrameTableProps> = ({ data }) => {
           {data.map((row, rowIndex) => (
             <tr key={rowIndex}>
               {headers.map((header) => (
-                <td key={header} className="px-3 py-2 whitespace-pre-line break-all max-w-xs overflow-hidden text-ellipsis">
+                <td key={header} className="px-3 py-2 whitespace-pre-line break-all overflow-hidden text-ellipsis min-w-[150px]">
                   {typeof row[header] === 'object' ? JSON.stringify(row[header]) : String(row[header])}
                 </td>
               ))}
@@ -73,6 +73,7 @@ export function GraphExecutionPanel() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFileNames, setSelectedFileNames] = useState<string[]>([]);
+  const [isRawJsonCollapsed, setIsRawJsonCollapsed] = useState(true);
 
   const client = React.useMemo(() => {
     if (!selectedInbox?.deploymentUrl) return null;
@@ -309,7 +310,7 @@ export function GraphExecutionPanel() {
       if (initialRunResponse && initialRunResponse.run_id && (initialRunResponse.status === "pending" || initialRunResponse.status === "running")) {
         const runId = initialRunResponse.run_id;
         const pollInterval = 3000;
-        const maxAttempts = 20;
+        const maxAttempts = 100;
         let attempts = 0;
 
         const intervalId = setInterval(async () => {
@@ -335,6 +336,7 @@ export function GraphExecutionPanel() {
                 try {
                   const threadState = await client.threads.getState(runThreadId);
                   finalStateForHistory = threadState?.values || threadState; 
+                  setRawResult(finalStateForHistory);
                   toast({ title: "成功", description: "グラフが正常に実行されました。" });
                 } catch (getStateError: any) {
                   console.error("Error fetching thread state after run completion:", getStateError);
@@ -639,11 +641,40 @@ export function GraphExecutionPanel() {
                 <p className="text-sm text-muted-foreground">表示できる結果がありません。</p>
             )}
           </div>
-          <h3 className="text-md font-semibold mb-1 mt-2">Raw JSON 結果</h3>
-          <div className="flex-grow overflow-auto border rounded-md p-2 bg-gray-50 max-w-full overflow-x-auto">
-            <pre className="text-xs whitespace-pre-wrap break-all max-w-full overflow-x-auto">
-              {rawResult ? JSON.stringify(rawResult, null, 2) : "結果がありません"}
-            </pre>
+          
+          {/* ★ 出力ファイルセクションを先に表示 */}
+          {rawResult && rawResult.output_excel_path && typeof rawResult.output_excel_path === 'string' && (
+            <div className="mt-4 p-4 border rounded-md bg-gray-50">
+              <h3 className="text-lg font-semibold mb-2">出力ファイル</h3>
+              <a
+                href={`/api/download-file?filePath=${encodeURIComponent(rawResult.output_excel_path)}`}
+                download={rawResult.output_excel_path.split('/').pop() || rawResult.output_excel_path.split('\\').pop() || 'download.xlsx'}
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+                target="_blank" 
+                rel="noopener noreferrer"
+              >
+                ダウンロード
+              </a>
+            </div>
+          )}
+
+          {/* ★ Raw JSON 結果セクションを下に移動し、折りたたみ機能を追加 */}
+          <div className="mt-4 p-4 border rounded-md bg-gray-50">
+            <h3 
+              className="text-lg font-semibold mb-2 cursor-pointer flex items-center"
+              onClick={() => setIsRawJsonCollapsed(!isRawJsonCollapsed)}
+            >
+              Raw JSON 結果
+              <span className="ml-2 text-sm">{isRawJsonCollapsed ? '▼ 開く' : '▲ 閉じる'}</span>
+            </h3>
+            {!isRawJsonCollapsed && (
+              <div className="flex-grow overflow-auto border rounded-md p-2 bg-white max-w-full overflow-x-auto">
+                 {/* bg-whiteを追加してpreとの区別を明確に */}
+                <pre className="text-xs whitespace-pre-wrap break-all max-w-full overflow-x-auto">
+                  {rawResult ? JSON.stringify(rawResult, null, 2) : "結果がありません"}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}

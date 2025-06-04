@@ -18,11 +18,10 @@ export function ThreadView<
   const [showDescription, setShowDescription] = React.useState(true);
   const [showState, setShowState] = React.useState(false);
 
+  const showSidePanel = showDescription || showState;
+
   // Create interrupt actions if we have an interrupted thread
   const isInterrupted = threadData?.status === "interrupted";
-
-  // Show side panel for all thread types
-  const showSidePanel = showDescription || showState;
 
   // Scroll to top when thread view is mounted
   React.useEffect(() => {
