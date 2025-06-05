@@ -443,78 +443,16 @@ export function ThreadActionsView<
     );
   }
 
-  // Handle Valid Interrupted Threads
+  // Handle Valid Interrupted Threads (simplified view)
   //////////////////////////////////////////////////////////
   return (
-    <div className="flex flex-col min-h-full w-full p-12 gap-9">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between w-full gap-3">
-        <div className="flex items-center justify-start gap-3">
-          <TooltipIconButton
-            tooltip="Back to inbox"
-            variant="ghost"
-            onClick={() => {
-              updateQueryParams(VIEW_STATE_THREAD_QUERY_PARAM);
-            }}
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </TooltipIconButton>
-          <p className="text-2xl tracking-tighter text-pretty">
-            Sample Test Agent
-          </p>
-          <ThreadIdCopyable threadId={threadData.thread.thread_id} />
-        </div>
-        <div className="flex flex-row gap-2 items-center justify-start">
-          {deploymentUrl && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex items-center gap-1 bg-white"
-              onClick={handleOpenInStudio}
-            >
-              Studio
-            </Button>
-          )}
-          {/* Added ButtonGroup for interrupted threads */}
-          <ButtonGroup
-            handleShowState={() => updateSidePanel(true, false)}
-            handleShowDescription={() => updateSidePanel(false, true)}
-            showingState={showState}
-            showingDescription={showDescription}
-          />
-        </div>
-      </div>
+    <div className="flex flex-col min-h-full w-full p-4 gap-4">
+      {firstInterrupt?.description && (
+        <p className="text-sm text-gray-700 whitespace-pre-wrap">
+          {firstInterrupt.description}
+        </p>
+      )}
 
-      {/* Interrupted thread actions */}
-      <div className="flex flex-row gap-2 items-center justify-start w-full">
-        <Button
-          variant="outline"
-          className="text-gray-800 border-gray-500 font-normal bg-white"
-          onClick={actions?.handleResolve}
-          disabled={actions?.loading}
-        >
-          Mark as Resolved
-        </Button>
-        {ignoreAllowed && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={actions?.handleIgnore}
-                disabled={actions?.loading}
-              >
-                Ignore
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Ignore this interrupt and end the thread.
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      {/* Actions */}
       <InboxItemInput
         acceptAllowed={acceptAllowed}
         hasEdited={actions?.hasEdited ?? false}

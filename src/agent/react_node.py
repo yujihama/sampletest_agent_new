@@ -43,50 +43,6 @@ class Result(BaseModel):
     support_data: str = Field(description="根拠を裏付けるデータ")
     result: str = Field(description="結果(OK/NG/NA)")
 
-def query_to_human(query: str, purpose: str) -> str:
-    """
-    他の手段で回答に必要な情報を取得できない場合に、人間に問い合わせる。
-    どのデータについて、何を確認したいか明確に伝えることが必要。
-
-    arg:
-        query: 問い合わせ内容
-        purpose: このツールを呼ぶ意図・目的
-    return:
-        str: 問い合わせ結果
-    """
-    action_request = ActionRequest(
-        action="Confirm Message",
-        args={"message": query},
-    )
-
-    interrupt_config = HumanInterruptConfig(
-        allow_ignore=True,  # ユーザーが無視できる
-        allow_respond=True,  # ユーザーが返信できる
-        allow_edit=True,  # ユーザーが編集できる
-        allow_accept=True,  # ユーザーが承認できる
-    )
-
-    async_request = HumanInterrupt(
-        action_request=action_request, config=interrupt_config
-    )
-
-    human_response: HumanResponse = interrupt([async_request])[0]
-
-    message = ""
-    if human_response.get("type") == "response":
-        message = f"User responded with: {human_response.get('args')}"
-        
-    elif human_response.get("type") == "accept":
-        message = f"User accepted with: {human_response.get('args')}"
-        
-    elif human_response.get("type") == "edit":
-        message = f"User edited with: {human_response.get('args')}"
-        
-    elif human_response.get("type") == "ignore":
-        message = "User ignored interrupt."
-    
-    return message
-
 def get_base64_from_image(image_path: str) -> str:
     """
     画像ファイルを読み込み、base64エンコードされた文字列を返す関数
@@ -105,8 +61,13 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
     current_iteration = int(state.iteration_count) + 1
     logger.info(f"--- Iteration {current_iteration}/{state.max_iterations} ---")
 
+    sample_data = ""
+    sample_num = state.max_iterations
     if state.sample_data_path:
-        data_path = os.path.join("C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample",state.sample_data_path)
+        data_path = os.path.join(
+            "C:\\Users\\nyham\\work\\sampletest_3\\agent-inbox-langgraph-example\\data\\sample",
+            state.sample_data_path,
+        )
         sample_num = len(os.listdir(data_path))
 
     image_data = []
@@ -163,9 +124,44 @@ def react_node(state: State, config: RunnableConfig) -> Dict[str, Any]:
         # print(f"analyze_image_tool result: {result.content}") # デバッグ用
         return result.content
 
+    # 人間への問い合わせツール。現在処理中のサンプルデータ名を説明に含める
+    @tool
+    def query_to_human_tool(query: str, purpose: str) -> str:
+        action_request = ActionRequest(
+            action="Confirm Message",
+            args={"message": query},
+        )
+
+        interrupt_config = HumanInterruptConfig(
+            allow_ignore=False,
+            allow_respond=True,
+            allow_edit=False,
+            allow_accept=False,
+        )
+
+        async_request = HumanInterrupt(
+            action_request=action_request,
+            config=interrupt_config,
+            description=f"サンプルデータ '{sample_data}' で発生した問い合わせ",
+        )
+
+        human_response: HumanResponse = interrupt([async_request])[0]
+
+        message = ""
+        if human_response.get("type") == "response":
+            message = f"User responded with: {human_response.get('args')}"
+        elif human_response.get("type") == "accept":
+            message = f"User accepted with: {human_response.get('args')}"
+        elif human_response.get("type") == "edit":
+            message = f"User edited with: {human_response.get('args')}"
+        elif human_response.get("type") == "ignore":
+            message = "User ignored interrupt."
+
+        return message
+
     agent = create_react_agent(
         model="gpt-4.1-mini",
-        tools=[query_to_human, analyze_image_tool],
+        tools=[query_to_human_tool, analyze_image_tool],
         prompt="必ず日本語で回答してください。",
         state_schema=AgentState_custom,
         response_format=Result
