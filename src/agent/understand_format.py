@@ -109,6 +109,8 @@ def extract_excel_data_and_capture(state: ExcelFormState) -> ExcelFormState:
                     dimension = sheet_capture.calculate_dimension()
                     if dimension:
                         sheet_capture.print_area = dimension
+                        # LibreOffice が印刷範囲を確実に認識するよう fitToPage を有効化
+                        sheet_capture.page_setup.fitToPage = True
                         logger.info(f"シート '{sheet_capture.title}' の印刷範囲を {dimension} に設定しました")
                 except Exception as e_dim:
                     logger.warning(f"シート '{sheet_capture.title}' の印刷範囲設定エラー: {e_dim}")
@@ -436,6 +438,7 @@ def capture_highlighted_excel(state: ExcelFormState) -> ExcelFormState:
                 dimension_hl = sheet_hl_obj.calculate_dimension()
                 if dimension_hl:
                     sheet_hl_obj.print_area = dimension_hl
+                    sheet_hl_obj.page_setup.fitToPage = True
                     logger.info(f"ハイライト済みシート '{sheet_hl_obj.title}' の印刷範囲を {dimension_hl} に設定しました")
             except Exception as e_dim_hl:
                 logger.warning(f"ハイライト済みシート '{sheet_hl_obj.title}' の印刷範囲設定エラー: {e_dim_hl}")
