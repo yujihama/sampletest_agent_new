@@ -16,7 +16,7 @@ def run_excel_format_workflow_node(state: State) -> dict:
         "extracted_text_file": "",
         "original_excel_capture": "",
         "estimated_fields": {},
-        "structured_fields": ExcelFormFields(fields=[]),
+        "structured_fields": ExcelFormFields(fields=[], reason=""),
         "highlighted_excel": "",
         "highlighted_captures": [],
         "validation_result": "",
@@ -33,5 +33,6 @@ def run_excel_format_workflow_node(state: State) -> dict:
     # Stateに結果を格納して返す
     return {
         "excel_format_result": result.get("estimated_fields", {}),
-        "excel_format_json_path": result.get("final_json", "")
+        "excel_format_json_path": result.get("final_json", ""),
+        "highlighted_captures": result.get("highlighted_captures", "")
     } 

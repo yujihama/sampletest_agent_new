@@ -101,7 +101,10 @@ def update_format_node(state: State) -> dict:
 
     with open(json_path, "r", encoding="utf-8") as f:  # これはLLMへの入力なので元のまま
         format_json_for_llm = f.read()
-
+    
+    with open(state.highlighted_captures[-1], "rb") as img_file:
+        base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+    
     # LLMに、各セルにどのようなデータを記入するか回答させる
     llm = ChatOpenAI(model="gpt-4.1")
     prompt = f"""
@@ -129,7 +132,17 @@ def update_format_node(state: State) -> dict:
     # 監査結果データ:
     {df.to_dict(orient="records")}
     """
-    response = llm.with_structured_output(CellValueList).invoke(prompt)
+    response = llm.with_structured_output(CellValueList).invoke([
+                HumanMessage(content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_image}"
+                        }
+                    }
+                ])
+            ])
     logger.info(response.items)
 
     # エクセルフォーマットを更新

@@ -6,6 +6,7 @@ import asyncio
 app = FastAPI()
 
 UPLOAD_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "sample")
+UPLOAD_ROOT_FORMAT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "format")
 
 def save_file(save_path: str, content: bytes):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -22,6 +23,20 @@ async def upload_folder(files: List[UploadFile] = File(...)):
         await asyncio.to_thread(save_file, save_path, content)
         results.append({
             "saved_path": os.path.relpath(save_path, UPLOAD_ROOT),
+            "size": len(content)
+        })
+    return {"files": results}
+
+@app.post("/upload-format/")
+async def upload_format(files: List[UploadFile] = File(...)):
+    results = []
+    for file in files:
+        content = await file.read()
+        rel_path = file.filename.replace("..", "_").lstrip("/\\")
+        save_path = os.path.join(UPLOAD_ROOT_FORMAT, rel_path)
+        await asyncio.to_thread(save_file, save_path, content)
+        results.append({
+            "saved_path": os.path.relpath(save_path, UPLOAD_ROOT_FORMAT),
             "size": len(content)
         })
     return {"files": results}

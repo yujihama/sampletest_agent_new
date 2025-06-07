@@ -37,7 +37,13 @@ class ExcelField(BaseModel):
 class ExcelFormFields(BaseModel):
     """Excelフォームの入力欄情報のコレクション"""
     fields: List[ExcelField] = Field(..., description="検出された入力欄のリスト")
+    reason: str = Field(..., description="判断根拠")
     
+class CollectExcelFormFields(BaseModel):
+    """Excelフォームの入力欄情報の修正箇所"""
+    add_fields: List[ExcelField] = Field(..., description="追加する入力欄のリスト")
+    delete_fields: List[ExcelField] = Field(..., description="削除する入力欄のリスト")
+    reason: str = Field(..., description="判断根拠")
 
 # Pydanticモデル: 検証結果
 class ValidationResult(BaseModel):
@@ -83,19 +89,26 @@ def extract_excel_data_and_capture(state: ExcelFormState) -> ExcelFormState:
             base_save_path = Path(state["excel_file"]).parent
         
         final_output_dir = base_save_path / "format_data"
+
+        # format_data ディレクトリが存在すれば削除して再作成
+        if final_output_dir.exists():
+            import shutil # shutilをインポート
+            shutil.rmtree(final_output_dir)
+            logger.info(f"既存の出力ディレクトリ {final_output_dir} を削除しました。")
+        
         final_output_dir.mkdir(exist_ok=True, parents=True)
         
         # キャプチャ用ディレクトリ作成
         captures_dir = final_output_dir / "captures"
         captures_dir.mkdir(exist_ok=True, parents=True)
 
-        # キャプチャ前に既存のPNGファイルを削除
-        for png_file in captures_dir.glob("*.png"):
-            try:
-                png_file.unlink()
-                logger.info(f"既存のキャプチャファイルを削除: {png_file}")
-            except Exception as e:
-                logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
+        # キャプチャ前に既存のPNGファイルを削除 (format_dataを削除するため、この処理は実質不要になるが、残しても問題はない)
+        # for png_file in captures_dir.glob("*.png"):
+        #     try:
+        #         png_file.unlink()
+        #         logger.info(f"既存のキャプチャファイルを削除: {png_file}")
+        #     except Exception as e:
+        #         logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
         
         # Excelファイルを開く (テキスト抽出用)
         workbook_orig = openpyxl.load_workbook(state["excel_file"])
@@ -287,7 +300,7 @@ def estimate_fields_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState
                         "url": f"data:image/png;base64,{base64_image}"
                     }
                 }
-            ])
+            ]),
         ])
         
         # 構造化された応答を取得
@@ -373,9 +386,14 @@ def highlight_fields(state: ExcelFormState) -> ExcelFormState:
                     # セルアドレスが有効かチェック
                     if len(cell_addr) >= 2 and cell_addr[0].isalpha() and cell_addr[1:].isdigit():
                         cell = sheet[cell_addr]
+                        original_value = cell.value # 元の値を取得
                         cell.fill = highlight_fill
+                        if original_value is not None and str(original_value).strip() != "":
+                            cell.value = f"{cell_addr}:{original_value}" # セルアドレスと元の値を連結
+                        else:
+                            cell.value = cell_addr # 元の値が空ならセルアドレスのみ設定
                 except Exception as cell_error:
-                    logger.warning(f"セル {cell_addr} のハイライト中にエラー: {str(cell_error)}")
+                    logger.warning(f"セル {cell_addr} のハイライトまたは値設定中にエラー: {str(cell_error)}")
         
         # ハイライト済みExcelを保存
         highlighted_excel = final_output_dir / f"highlighted_excel_v{state['current_iteration']}.xlsx"
@@ -421,12 +439,12 @@ def capture_highlighted_excel(state: ExcelFormState) -> ExcelFormState:
         captures_dir.mkdir(exist_ok=True, parents=True)
 
         # キャプチャ前に既存のPNGファイルを削除
-        for png_file in captures_dir.glob("*.png"):
-            try:
-                png_file.unlink()
-                logger.info(f"既存のキャプチャファイルを削除: {png_file}")
-            except Exception as e:
-                logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
+        # for png_file in captures_dir.glob("*.png"):
+        #     try:
+        #         png_file.unlink()
+        #         logger.info(f"既存のキャプチャファイルを削除: {png_file}")
+        #     except Exception as e:
+        #         logger.warning(f"キャプチャファイルの削除に失敗: {png_file} ({e})")
 
         # ハイライト済みExcelファイルをロードし、印刷範囲を設定
         highlighted_excel_path_str = state["highlighted_excel"]
@@ -567,9 +585,13 @@ def validate_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
             with open(capture_path, "rb") as img_file:
                 base64_image = base64.b64encode(img_file.read()).decode("utf-8")
             
+            # 画像をbase64エンコード
+            with open(state["original_excel_capture"], "rb") as img_file_original:
+                base64_image_original = base64.b64encode(img_file_original.read()).decode("utf-8")
+
             # プロンプトの作成
             prompt = f"""
-以下は、Excelフォームの入力欄として推定されたセルをハイライト（黄色背景）した画像です。
+以下は、Excelフォームの画像と、入力欄として推定されたセルをハイライト（yellow）した画像です。
 
 このハイライトされた箇所について、以下の観点で評価を行ってください。
 - 入力欄として適切なセルがハイライトされているか
@@ -583,6 +605,12 @@ def validate_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
             response = llm.invoke([
                 HumanMessage(content=[
                     {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_image_original}"
+                        }
+                    },
                     {
                         "type": "image_url",
                         "image_url": {
@@ -676,11 +704,15 @@ def correct_fields_with_multimodal_llm(state: ExcelFormState) -> ExcelFormState:
         with open(state["highlighted_captures"][0], "rb") as img_file:
             base64_image = base64.b64encode(img_file.read()).decode("utf-8")
         
+        # 元のExcelフォームの画像
+        with open(state["original_excel_capture"], "rb") as img_file_original:
+            base64_image_original = base64.b64encode(img_file_original.read()).decode("utf-8")
+
         # マルチモーダルLLMクライアントの初期化（structured_output使用）
         llm = ChatOpenAI(
             model="gpt-4.1-mini",
             temperature=0
-        ).with_structured_output(ExcelFormFields)
+        ).with_structured_output(CollectExcelFormFields)
         
         # プロンプトの作成
         prompt = f"""
@@ -690,18 +722,24 @@ STEP1:以下の情報をよく確認してください。
 - 現在推定されているExcelフォームの入力欄情報
 {structured_fields.model_dump_json(indent=2)}
 
-- 添付の画像 ※推定された入力欄をハイライトしたExcelシートの画像
+- 添付の画像 ※元のExcelフォームの画像と、推定された入力欄をハイライトしたExcelシートの画像
 
 - これらに対するレビュー結果
 {structured_validation.model_dump_json(indent=2)}
 
-STEP2:検証結果と画像に基づいて、入力欄情報を修正してください。指摘がない箇所は変更しないで回答に含めてください。
+STEP2:検証結果と画像に基づいて、修正すべき箇所を回答してください。
 """
         
         # マルチモーダルLLMに問い合わせ
         response = llm.invoke([
             HumanMessage(content=[
                 {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{base64_image_original}"
+                    }
+                },
                 {
                     "type": "image_url",
                     "image_url": {
@@ -712,20 +750,39 @@ STEP2:検証結果と画像に基づいて、入力欄情報を修正してく�
         ])
         
         # 構造化された応答を取得
-        corrected_structured_fields = response
+        correction_instructions = response  # CollectExcelFormFields 型
+
+        # 現在のフィールドリストを取得
+        current_fields_list = list(state["structured_fields"].fields)
+        current_fields_dict = {field.cell_id: field for field in current_fields_list}
+
+        # 削除するフィールドを処理
+        for field_to_delete in correction_instructions.delete_fields:
+            if field_to_delete.cell_id in current_fields_dict:
+                del current_fields_dict[field_to_delete.cell_id]
+
+        # 追加するフィールドを処理
+        for field_to_add in correction_instructions.add_fields:
+            current_fields_dict[field_to_add.cell_id] = field_to_add
+        
+        updated_fields_list = list(current_fields_dict.values())
+
+        # 更新されたExcelFormFieldsを作成
+        updated_structured_fields = ExcelFormFields(
+            fields=updated_fields_list,
+            reason=correction_instructions.reason  # LLMからの判断根拠を使用
+        )
         
         # 従来の形式（Dict[str, str]）に変換（互換性のため）
         corrected_fields = {}
-        for field in corrected_structured_fields.fields:
+        for field in updated_structured_fields.fields:
             corrected_fields[field.cell_id] = field.description
         
-        # 結果をファイルに保存
         next_iteration = state["current_iteration"] + 1
         
-        # 構造化された形式を保存
         structured_fields_file = final_output_dir / f"structured_fields_v{next_iteration}.json"
         with open(structured_fields_file, "w", encoding="utf-8") as f:
-            f.write(corrected_structured_fields.model_dump_json(indent=2))
+            f.write(updated_structured_fields.model_dump_json(indent=2))
         
         # 従来の形式も保存（互換性のため）
         corrected_fields_file = final_output_dir / f"estimated_fields_v{next_iteration}.json"
@@ -738,7 +795,7 @@ STEP2:検証結果と画像に基づいて、入力欄情報を修正してく�
         return {
             **state,
             "estimated_fields": corrected_fields,
-            "structured_fields": corrected_structured_fields,
+            "structured_fields": updated_structured_fields, # 更新された情報をセット
             "current_iteration": next_iteration,
             "status": "進行中"
         }
